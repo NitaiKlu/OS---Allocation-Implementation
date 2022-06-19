@@ -1,0 +1,47 @@
+Nitai and Aviv rockssssss
+
+## part 1:
+
+1. simply trying to use sbrk()
+2. return results
+resposible: Aviv
+
+## part 2:
+
+1. each block allocated contains a struct containing: 
+struct MallocMetadata {
+ size_t size;
+ bool is_free;
+ MallocMetadata* next;
+ MallocMetadata* prev;
+};
+
+2. implicit free list, no merges, no splits.
+
+3. Other fields to keep:
+    a. number of (bytes,blocks) allocated thus far
+    b. number of (bytes,blocks) free
+
+4. size doesn't change! once allocated, the size remains for ever
+
+5. The list of metaData structs (and blocks as a result) is sorted by their 
+virtual address. 
+
+6. finding the block to use for allocation is by "first fit".
+
+7. An initial underline in function names means “hidden” or “private” functions in
+programmer lingo - these are not meant to be called directly by the user.
+
+8. Wrong usage of sfree() and srealloc() (e.g. sending bad pointers) is not your
+responsibility
+
+9. You should use std::memmove for copying data in srealloc().
+You should use std::memset for setting values to 0 in your scalloc().
+
+10. If your algorithm chooses a large block (e.g. 1000 bytes) for a small allocation (e.g. 10
+bytes), you should mark the entire block as used.
+
+resposible: Aviv
+
+
+## part 3:
