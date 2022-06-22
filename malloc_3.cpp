@@ -80,7 +80,11 @@ bool compare_address(const MallocMetadata &first, const MallocMetadata &second)
 size_t padd_size(size_t size) 
 {
     // some mathmatical calc
-    return size; // for now
+    int mod8 = size % 8;
+    if(mod8 == 0) {
+        return size + meta_size;
+    }
+    return (size/8 + 1) * 8 + meta_size;
 }
 
 bool isSplitable(const size_t remainder) 
@@ -108,6 +112,7 @@ void *smalloc(size_t size)
         {
             int remaining = it_free_list->size - size;
             auto block = it_free_list;
+            void *address = &(*block);
             if(isSplitable(remaining))  // to split or not to split?
             {
                 block->size = size;
@@ -126,39 +131,73 @@ void *smalloc(size_t size)
             allocated_blocks++;
             allocated_bytes += size;
             free_list.sort(compare);
-            return;
+            return address + meta_size;
         }
     }
     // reaching here means we couldn't find a large enough spot in the free_list
     // let's try wilderness instead:
-    if(wilderness->size >= size && wilderness->is_free == true)
+    if(wilderness->is_free)
     {
-        if(isSplitable(wilderness->size - size))
+        if(wilderness->size >= size)
         {
-            
+            if(isSplitable(wilderness->size - size))
+            {
+                MallocMetadata *old_wilderness = wilderness;
+                old_wilderness->size = size;
+                // should assign new wilderness and keep it free
+                MallocMetadata *new_wilderness = (MallocMetadata *)(wilderness + size);
+                *new_wilderness = MallocMetadata(wilderness->size - size);
+                new_wilderness->is_free = true;
+                wilderness = new_wilderness;
+                // stats:
+                free_bytes -= (size - meta_size);
+                allocated_blocks++;
+                allocated_bytes += (wilderness->size - size);
+                meta_data_bytes += meta_size;
+                return old_wilderness + meta_size;
+            }
+            else {
+                wilderness->is_free = false;
+                // stats:
+                free_blocks--;
+                free_bytes -= (wilderness->size - meta_size);
+            }
         }
-        // wilderness->is_free = false;
+        else 
+        {
+            // need to sbrk()
+            void *ptr = sbrk(size - wilderness->size);
+            if (ptr == (void *)(-1))
+            {
+                return nullptr;
+            }
+            wilderness->size = size;
+            wilderness->is_free = false;
+            // stats:
+            free_blocks--;
+            free_bytes -= (size - meta_size);
+            allocated_bytes += (size - wilderness->size);
+            return wilderness + meta_size;
+        }
     }
-    else 
+    else //need to assign new wilderness and use it
     {
-        // need to sbrk()
         void *ptr = sbrk(size);
         if (ptr == (void *)(-1))
         {
             return nullptr;
         }
-        MallocMetadata *new_wilderness = (MallocMetadata *)(wilderness + size);
-        *new_wilderness = MallocMetadata(wilderness->size);
+        MallocMetadata *new_wilderness = (MallocMetadata *)(wilderness + wilderness->size);
+        *new_wilderness = MallocMetadata(size);
+        new_wilderness->is_free = false;
         wilderness = new_wilderness;
-
+        // stats:
+        allocated_blocks++;
+        allocated_bytes += (size - meta_size);
+        meta_data_bytes += meta_size;
     }
-    free_bytes -= size;
-    allocated_blocks++;
-    allocated_bytes += size;
 
-    free_bytes -= curr_meta->size;
-
-    return curr_meta + meta_size;
+    return wilderness + meta_size;
 }
 
 void *scalloc(size_t num, size_t size)
