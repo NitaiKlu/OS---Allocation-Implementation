@@ -20,12 +20,11 @@ struct MallocMetadata
 
 const size_t meta_size = sizeof(MallocMetadata);
 list<MallocMetadata> free_list;
-// list<MallocMetadata> blocks_list;
 list<MallocMetadata> mmap_list;
 MallocMetadata *wilderness= &MallocMetadata(0); //may be free and may not. Thus - not in free_list!
 size_t free_blocks = 0;
 size_t free_bytes = 0;
-size_t allocated_blocks = 0;
+size_t allocated_blocks = 0; //total num of blocks
 size_t allocated_bytes = 0;
 size_t meta_data_bytes = 0;
 
@@ -72,7 +71,7 @@ bool compare_address(const MallocMetadata &first, const MallocMetadata &second)
 }
 
 /**
- * @brief padds size to be multiple of 8 and include the metaData size!!
+ * @brief padds size to be multiple of 8, including the metaData size
  * 
  * @param size the size to padd
  * @return size_t whole & divides by 8
@@ -80,11 +79,12 @@ bool compare_address(const MallocMetadata &first, const MallocMetadata &second)
 size_t padd_size(size_t size) 
 {
     // some mathmatical calc
-    int mod8 = size % 8;
+    int full_size = size + meta_size;
+    int mod8 = full_size % 8;
     if(mod8 == 0) {
-        return size + meta_size;
+        return full_size;
     }
-    return (size/8 + 1) * 8 + meta_size;
+    return (full_size/8 + 1) * 8;
 }
 
 bool isSplitable(const size_t remainder) 
@@ -121,15 +121,17 @@ void *smalloc(size_t size)
                 MallocMetadata *new_block = (MallocMetadata *)(curr_meta + size);
                 *new_block = MallocMetadata(remaining);
                 free_list.push_front(*new_block);
+                // stats:
+                allocated_blocks++;
+                meta_data_bytes += meta_size;
             }
             else {
                 block->size = size;
-                free_blocks--;
                 free_list.erase(block);
+                // stats:
+                free_blocks--;
             }
-            free_bytes -= size;
-            allocated_blocks++;
-            allocated_bytes += size;
+            free_bytes -= (size - meta_size); 
             free_list.sort(compare);
             return address + meta_size;
         }
@@ -210,6 +212,27 @@ void *scalloc(size_t num, size_t size)
     return ptr;
 }
 
+MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
+{
+    return previous; //for now
+}
+
+MallocMetadata *_findClosestNext(MallocMetadata *block)
+{
+
+    return block; //for now
+}
+
+MallocMetadata *_findClosestPrevious(MallocMetadata *block)
+{
+    return block; //for now
+}
+
+MallocMetadata *_previousToWilderness()
+{
+    return wilderness; //for now
+}
+
 void sfree(void *p)
 {
     if (!p)
@@ -217,10 +240,57 @@ void sfree(void *p)
     MallocMetadata *meta = ((MallocMetadata *)(p - meta_size));
     if (meta->is_free)
         return;
-    meta->is_free = true;
+    
+    // check and handle if mmapped
 
+    // check and handle if wilderness is meta
+    if(wilderness == meta)
+    {
+        MallocMetadata *prev = _previousToWilderness();
+        if(prev + prev->size == wilderness) //adjacent from the back
+        {
+            prev->size += wilderness->size - meta_size;
+            wilderness = prev;
+            free_list.remove(*prev);
+            free_bytes += wilderness->size;
+            allocated_blocks--;
+            meta_data_bytes -= meta_size;
+        }
+        else 
+        {
+            wilderness->is_free = true;
+        }
+        return;
+    }
+    // if we get here we are not freeing wilderness
+    meta->is_free = true;
+    MallocMetadata *previous = _findClosestPrevious(meta);
+    MallocMetadata *next = _findClosestNext(meta);
+    if(previous + previous->size  == meta) //adjacent from the back
+    {
+        free_list.remove(*meta);
+        free_list.remove(*previous);
+        meta = _merge(previous, meta);
+        if(meta + meta->size == next) //also from the front
+        {
+            free_list.remove(*next);
+            meta = _merge(meta, next);
+        }
+    }
+    else {
+        if(meta + meta->size == next) //adjacent from the front
+        {
+            free_list.remove(*next);
+            meta = _merge(meta, next);
+        }
+    }
+
+    free_list.push_back(*meta);
+    free_list.sort(compare);
+    // stats:
     free_blocks++;
-    free_bytes += meta->size;
+    free_bytes += (meta->size - meta_size);
+
 }
 
 void *srealloc(void *oldp, size_t size)
