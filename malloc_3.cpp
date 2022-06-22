@@ -22,7 +22,7 @@ struct MallocMetadata
 MallocMetadata *MallocMetadata::setTip()
 {
     MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
-    *tip = MallocTip(new_wilderness);
+    *tip = MallocTip(this);
     return tip;
 }
 
@@ -54,6 +54,15 @@ MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
 {
     return previous; // for now
 }
+
+/**
+ * @brief follows the same pattern as _marge but also copies the data of the block
+ * to the new merged one
+ * @param previous 
+ * @param next 
+ * @return MallocMetadata* of the merged block
+ */
+MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next);
 
 /**
  * @brief finds the closest free block to "block" by memory address
@@ -382,6 +391,13 @@ void *srealloc(void *oldp, size_t size)
     {
         return oldp;
     }
+    //check if mmap and handle if so:
+    /*
+        code here
+    */
+    
+    MallocMetadata *previous = _findClosestPrevious(old_meta);
+    MallocMetadata *next = _findClosestNext(old_meta);
     void *ptr = smalloc(size);
     if (!ptr)
         return ptr;
