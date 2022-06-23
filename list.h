@@ -9,6 +9,29 @@
 #define DOUBLE 0
 #define ADDRESS 1
 
+struct MallocMetadata;
+
+struct MallocTip
+{
+    MallocMetadata *front;
+    MallocTip(MallocMetadata *front) : front(front){};
+};
+
+struct MallocMetadata
+{
+    size_t size;
+    bool is_free;
+    MallocMetadata *next;
+    MallocMetadata *prev;
+    MallocMetadata(size_t _size = 0) : size(_size), is_free(true){};
+    MallocTip *setTip()
+    {
+        MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
+        *tip = MallocTip(this);
+        return tip;
+    }
+};
+
 typedef struct MallocMetadata MallocMetadata;
 
 class CompareBy
@@ -45,18 +68,20 @@ public:
     }
 };
 
-struct MetaDataList
+class MetaDataList
 {
+private:
     int size;
     CompareBy cmp;
     MallocMetadata *head;
+    void setHead(MallocMetadata *new_head);
 
-    MetaDataList(int compare) : size(0), cmp(compare) {};
-    ~MetaDataList();
+public:
+    MetaDataList(int compare = DOUBLE);
+    ~MetaDataList() = default;
     MallocMetadata *begin();
     MallocMetadata *end();
     void erase(MallocMetadata *to_delete);
     void push(MallocMetadata *to_add);
     bool find(MallocMetadata *to_find);
-
 };

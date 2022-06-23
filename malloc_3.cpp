@@ -10,27 +10,6 @@ using std::list;
 
 const long max_size = std::pow(10, 8);
 
-struct MallocMetadata
-{
-    size_t size;
-    bool is_free;
-    MallocMetadata *next;
-    MallocMetadata *prev;
-    MallocMetadata(size_t _size) : size(_size), is_free(true){};
-    MallocTip *setTip()
-    {
-        MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
-        *tip = MallocTip(this);
-        return tip;
-    }
-};
-
-struct MallocTip
-{
-    MallocMetadata *front;
-    MallocTip(MallocMetadata *front) : front(front){};
-};
-
 const size_t meta_size = sizeof(MallocMetadata) + sizeof(MallocTip);
 MetaDataList free_list = MetaDataList(DOUBLE);
 MetaDataList mmap_list = MetaDataList(DOUBLE);
@@ -435,7 +414,7 @@ void *srealloc(void *oldp, size_t size)
                     prev->is_free = false;
                     // stats:
                     free_blocks--;
-                    
+
                     return prev;
                 }
             }
