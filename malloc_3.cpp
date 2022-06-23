@@ -2,8 +2,10 @@
 #include <unistd.h>
 #include <cmath>
 #include <cstring>
+#include <sys/mman.h>
 #include "list.h"
 #define SPLIT_SIZE 128
+#define LARGE_MEM 128 * 1024
 using std::list;
 
 const long max_size = std::pow(10, 8);
@@ -15,8 +17,7 @@ struct MallocMetadata
     MallocMetadata *next;
     MallocMetadata *prev;
     MallocMetadata(size_t _size) : size(_size), is_free(true){};
-    MallocTip *setTip();
-    MallocTip *getTip()
+    MallocTip *setTip()
     {
         MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
         *tip = MallocTip(this);
@@ -50,7 +51,9 @@ size_t meta_data_bytes = 0;
  */
 MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
 {
-    return previous; // for now
+    previous->size += next->size - meta_size;
+    previous->setTip();
+    return previous;
 }
 
 /**
@@ -60,7 +63,11 @@ MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
  * @param next
  * @return MallocMetadata* of the merged block
  */
-MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next);
+MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next)
+{
+    previous = _merge(previous, next);
+    std::memmove(next - sizeof(MallocTip), next + sizeof(MallocMetadata), next->size - meta_size);
+}
 
 /**
  * @brief finds the closest free block to "block" by memory address
@@ -102,50 +109,35 @@ MallocMetadata *_previousToWilderness()
 }
 
 /**
- * @brief compare function for the free list or the mmap list
+ * @brief returns the best fit possible given the size we need to allocate.
  *
- * @param first first block
- * @param second second block
- * @return true if first block is before/same as second in the free_list
- * @return false otherwise
+ * @param size size in bytes to allocate, already including metaData and padding.
+ * @return MallocMetadata* of the best free block in free_block. nullptr if couldn't find
  */
-bool compare(const MallocMetadata &first, const MallocMetadata &second)
+MallocMetadata *_findBestFit(size_t size)
 {
-    if (first.size < second.size)
+    MallocMetadata *best_fit = nullptr;
+    for (auto it = free_list.begin(); it != free_list.end(); it = it->next)
     {
-        return true;
+        if (it->size >= size) // there is enough room in this block
+        {
+            if (best_fit == nullptr) // this is best_fit's first update
+            {
+                best_fit = it;
+            }
+            if (it->size < best_fit->size) // if 'it' is large enough for size and smaller then best_fit
+            {
+                // then it a better fit ;)
+                best_fit = it;
+            }
+        }
     }
-    if (first.size > second.size)
-    {
-        return false;
-    }
-    //  sizes are equal, we compare addresses:
-    if (&first < &second)
-        return true;
-
-    return false;
-}
-
-/**
- * @brief compare function for the list of *all blocks*
- *
- * @param first first block
- * @param second second block
- * @return true if first block is before/same as second in the free_list
- * @return false otherwise
- */
-bool compare_address(const MallocMetadata &first, const MallocMetadata &second)
-{
-    // we compare addresses:
-    if (&first < &second)
-        return true;
-
-    return false;
+    return best_fit;
 }
 
 /**
  * @brief padds size to be multiple of 8, including the metaData size
- *
+ * including the tip
  * @param size the size to padd
  * @return size_t whole & divides by 8
  */
@@ -161,6 +153,23 @@ size_t padd_size(size_t size)
     return (full_size / 8 + 1) * 8;
 }
 
+/**
+ * @brief padds size to be multiple of 8, including the metaData size
+ * **not including** the tip. Used for mmap reigons
+ * @param size the size to padd
+ * @return size_t whole & divides by 8
+ */
+size_t padd_size_no_tip(size_t size)
+{
+    int full_size = size + sizeof(MallocMetadata);
+    int mod8 = full_size % 8;
+    if (mod8 == 0)
+    {
+        return full_size;
+    }
+    return (full_size / 8 + 1) * 8;
+}
+
 bool isSplitable(const size_t remainder)
 {
     return remainder >= SPLIT_SIZE + meta_size;
@@ -168,56 +177,71 @@ bool isSplitable(const size_t remainder)
 
 void *smalloc(size_t size)
 {
-    if (size == 0)
+    if (size == 0 || size > max_size)
     {
         return nullptr;
     }
-    if (size > max_size)
+
+    if (size > LARGE_MEM) // mmap size
     {
-        // need to mmap this fucker
+        size = padd_size_no_tip(size);
+        void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, 0, 0);
+        if (ptr == MAP_FAILED)
+        {
+            return nullptr;
+        }
+        MallocMetadata *new_mmap = (MallocMetadata *)(ptr);
+        *new_mmap = MallocMetadata(size);
+        new_mmap->is_free = false;
+
+        mmap_list.push(new_mmap);
+        // should update stats??***********************
+        return new_mmap + sizeof(MallocMetadata);
     }
+
     // metaData size + 8-multiple padding
     size = padd_size(size);
 
-    // look for free block in free_list
-    for (auto it_free_list = free_list.begin(); it_free_list != free_list.end(); it_free_list = it_free_list->next)
+    // look for best free block in free_list
+    MallocMetadata *block = _findBestFit(size);
+
+    if (block != nullptr) // we found a block
     {
-        if (it_free_list->size >= size) // there is enough space here
+        int remaining = block->size - size;
+        MallocMetadata *address = block;
+        if (isSplitable(remaining)) // to split or not to split?
         {
-            int remaining = it_free_list->size - size;
-            auto block = it_free_list;
-            void *address = block;
-            if (isSplitable(remaining)) // to split or not to split?
-            {
-                block->size = size;
-                MallocMetadata *curr_meta = block;
-                free_list.erase(block);
-                MallocMetadata *new_block = (MallocMetadata *)(curr_meta + size);
-                *new_block = MallocMetadata(remaining);
+            block->size = size;
+            MallocMetadata *curr_meta = block;
+            free_list.erase(block);
+            MallocMetadata *new_block = (MallocMetadata *)(curr_meta + curr_meta->size);
+            *new_block = MallocMetadata(remaining);
+            new_block->is_free = true;
 
-                // tip update:
-                MallocTip *middle_tip = block->setTip();
-                MallocTip *edge_tip = new_block->setTip();
+            // tip update:
+            MallocTip *middle_tip = block->setTip();
+            MallocTip *edge_tip = new_block->setTip();
 
-                // list update:
-                free_list.push(new_block);
+            // list update:
+            free_list.push(new_block);
 
-                // stats:
-                allocated_blocks++;
-                meta_data_bytes += meta_size;
-            }
-            else
-            {
-                // no splitting - no need to update the Tips
-                block->size = size;
-                free_list.erase(block);
-
-                // stats:
-                free_blocks--;
-            }
-            free_bytes -= (size - meta_size);
-            return address + meta_size;
+            // stats:
+            allocated_blocks++;
+            meta_data_bytes += meta_size;
         }
+        else
+        {
+            // no splitting - no need to update the Tips
+            block->size = size;
+            block->is_free = false;
+            free_list.erase(block);
+
+            // stats:
+            free_blocks--;
+        }
+        free_bytes -= (size - meta_size);
+        address->is_free = false;
+        return address + meta_size;
     }
     // reaching here means we couldn't find a large enough spot in the free_list
     // let's try wilderness instead:
@@ -229,6 +253,7 @@ void *smalloc(size_t size)
             {
                 MallocMetadata *old_wilderness = wilderness;
                 old_wilderness->size = size;
+                old_wilderness->is_free = false;
                 // should assign new wilderness and keep it free
                 MallocMetadata *new_wilderness = (MallocMetadata *)(wilderness + size);
                 *new_wilderness = MallocMetadata(wilderness->size - size);
@@ -302,7 +327,7 @@ void *smalloc(size_t size)
         allocated_bytes += (size - meta_size);
         meta_data_bytes += meta_size;
     }
-
+    wilderness->is_free = false;
     return wilderness + meta_size;
 }
 
@@ -325,9 +350,16 @@ void sfree(void *p)
         return;
 
     // check and handle if mmapped
-    /*
-        code here
-    */
+    if (meta->size > LARGE_MEM)
+    {
+        mmap_list.erase(meta);
+        int err = munmap(meta, meta->size);
+        if (err != 0)
+        {
+            perror("unmapping failed.\n");
+            return;
+        }
+    }
 
     // check and handle if wilderness is meta
     if (wilderness == meta)
@@ -335,19 +367,13 @@ void sfree(void *p)
         MallocMetadata *prev = _previousToWilderness();
         if (prev != nullptr) // adjacent from the back
         {
-            prev->size += wilderness->size - meta_size;
-            prev->setTip();
-            wilderness = prev;
+            wilderness = _merge(prev, wilderness);
             free_list.erase(prev);
             free_bytes += wilderness->size;
             allocated_blocks--;
             meta_data_bytes -= meta_size;
         }
-        else
-        {
-            // no need to update tips
-            wilderness->is_free = true;
-        }
+        wilderness->is_free = true;
         return;
     }
     // if we get here we are not freeing wilderness
@@ -373,7 +399,7 @@ void sfree(void *p)
             meta = _merge(meta, next);
         }
     }
-
+    meta->is_free = true;
     free_list.push(meta);
     // stats:
     free_blocks++;
