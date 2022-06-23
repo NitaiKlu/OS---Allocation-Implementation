@@ -16,15 +16,13 @@ struct MallocMetadata
     MallocMetadata *prev;
     MallocMetadata(size_t _size) : size(_size), is_free(true){};
     MallocTip *setTip();
-    MallocTip *getTip();
+    MallocTip *getTip()
+    {
+        MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
+        *tip = MallocTip(this);
+        return tip;
+    }
 };
-
-MallocMetadata *MallocMetadata::setTip()
-{
-    MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
-    *tip = MallocTip(this);
-    return tip;
-}
 
 struct MallocTip
 {
@@ -58,8 +56,8 @@ MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
 /**
  * @brief follows the same pattern as _marge but also copies the data of the block
  * to the new merged one
- * @param previous 
- * @param next 
+ * @param previous
+ * @param next
  * @return MallocMetadata* of the merged block
  */
 MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next);
@@ -391,11 +389,11 @@ void *srealloc(void *oldp, size_t size)
     {
         return oldp;
     }
-    //check if mmap and handle if so:
+    // check if mmap and handle if so:
     /*
         code here
     */
-    
+
     MallocMetadata *previous = _findClosestPrevious(old_meta);
     MallocMetadata *next = _findClosestNext(old_meta);
     void *ptr = smalloc(size);

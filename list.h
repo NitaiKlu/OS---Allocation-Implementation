@@ -51,10 +51,11 @@ struct MetaDataList
     CompareBy cmp;
     MallocMetadata *head;
 
-    MetaDataList(int compare) : size(0), cmp(compare);
+    MetaDataList(int compare) : size(0), cmp(compare) {};
     ~MetaDataList();
     MallocMetadata *begin();
     MallocMetadata *end();
     void erase(MallocMetadata *to_delete);
     void push(MallocMetadata *to_add);
+
 };
