@@ -57,5 +57,6 @@ struct MetaDataList
     MallocMetadata *end();
     void erase(MallocMetadata *to_delete);
     void push(MallocMetadata *to_add);
+    bool find(MallocMetadata *to_find);
 
 };

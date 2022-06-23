@@ -116,23 +116,14 @@ MallocMetadata *_previousToWilderness()
  */
 MallocMetadata *_findBestFit(size_t size)
 {
-    MallocMetadata *best_fit = nullptr;
     for (auto it = free_list.begin(); it != free_list.end(); it = it->next)
     {
         if (it->size >= size) // there is enough room in this block
         {
-            if (best_fit == nullptr) // this is best_fit's first update
-            {
-                best_fit = it;
-            }
-            if (it->size < best_fit->size) // if 'it' is large enough for size and smaller then best_fit
-            {
-                // then it a better fit ;)
-                best_fit = it;
-            }
+            return it;
         }
     }
-    return best_fit;
+    return nullptr;
 }
 
 /**
@@ -352,6 +343,8 @@ void sfree(void *p)
     // check and handle if mmapped
     if (meta->size > LARGE_MEM)
     {
+        if (mmap_list.find(meta) == false)
+            return;
         mmap_list.erase(meta);
         int err = munmap(meta, meta->size);
         if (err != 0)
@@ -408,25 +401,49 @@ void sfree(void *p)
 
 void *srealloc(void *oldp, size_t size)
 {
-    if (!oldp)
-        return smalloc(size);
-    MallocMetadata *old_meta = ((MallocMetadata *)(oldp - meta_size));
-    if (old_meta->size <= size)
+    if (size == 0 || size > max_size)
     {
-        return oldp;
+        return nullptr;
     }
-    // check if mmap and handle if so:
-    /*
-        code here
-    */
-
-    MallocMetadata *previous = _findClosestPrevious(old_meta);
-    MallocMetadata *next = _findClosestNext(old_meta);
-    void *ptr = smalloc(size);
-    if (!ptr)
-        return ptr;
-    std::memmove(ptr, oldp, old_meta->size);
-    sfree(oldp);
+    MallocMetadata *meta = (MallocMetadata *)(oldp);
+    if (meta->size > LARGE_MEM) // mmap allocation
+    {
+        size = padd_size_no_tip(size);
+        if (size <= meta->size) // check if this is the right way or need to check only if size == meta.size
+            return meta;
+    }
+    else // sbrk allocation
+    {
+        size = padd_size(size);
+        if (size <= meta->size)
+            return meta;
+        if (meta == wilderness)
+        {
+        }
+        else
+        {
+            MallocMetadata *prev = _findClosestPrevious(meta);
+            MallocMetadata *next = _findClosestNext(meta);
+            if (prev != nullptr)
+            { // previous is free
+                // try to merge:
+                if (prev->size + meta->size > size)
+                { // then previous is enough
+                    free_list.erase(prev);
+                    free_list.erase(meta);
+                    _merge(prev, meta);
+                    prev->is_free = false;
+                    // stats:
+                    free_blocks--;
+                    
+                    return prev;
+                }
+            }
+            if (next != nullptr)
+            { // next is free
+            }
+        }
+    }
 }
 
 size_t _num_free_blocks()
