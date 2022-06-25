@@ -455,6 +455,7 @@ void *srealloc(void *oldp, size_t size)
                 { // then previous was enough
                     // need to check if spiltable**************************************
                     return wilderness + offset;
+                    
                 }
                 // enlarge wilderness:
                 int addition = size - wilderness->size;
