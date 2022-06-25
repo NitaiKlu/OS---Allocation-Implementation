@@ -1,13 +1,18 @@
 #include "list.h"
 
+MetaDataList::MetaDataList(int compare)
+    : size(0), cmp(compare), head(nullptr), tail(nullptr)
+{
+}
+
 void MetaDataList::setHead(MallocMetadata *new_head)
 {
     this->head = new_head;
 }
 
-MetaDataList::MetaDataList(int compare)
-    : size(0), cmp(compare), head(nullptr)
+void MetaDataList::setTail(MallocMetadata *new_tail)
 {
+    this->tail = new_tail;
 }
 
 MallocMetadata *MetaDataList::begin()
@@ -20,16 +25,23 @@ MallocMetadata *MetaDataList::end()
     return nullptr;
 }
 
+MallocMetadata *MetaDataList::getLast()
+{
+    return this->tail;
+}
+
 void MetaDataList::push(MallocMetadata *to_add)
 {
     MallocMetadata *curr, *next;
     curr = begin();
+    this->size++;
     // List is empty
     if (!curr)
     {
         to_add->prev = nullptr;
         to_add->next = nullptr;
         setHead(to_add);
+        setTail(to_add);
         return;
     }
     // Check if new node should be the Head
@@ -38,6 +50,7 @@ void MetaDataList::push(MallocMetadata *to_add)
         setHead(to_add);
         to_add->next = curr;
         curr->prev = to_add;
+        setTail(curr);
         return;
     }
     // Otherwise- look for right place
@@ -53,6 +66,7 @@ void MetaDataList::push(MallocMetadata *to_add)
         curr->next = to_add;
         to_add->next = nullptr;
         to_add->prev = curr;
+        setTail(to_add);
         return;
     }
     // New node should be between curr and next
@@ -78,6 +92,11 @@ void MetaDataList::erase(MallocMetadata *to_delete)
     {
         next->prev = prev;
     }
+    else
+    {
+        setTail(prev);
+    }
+    this->size--;
 }
 
 bool MetaDataList::find(MallocMetadata *to_find)
@@ -89,4 +108,9 @@ bool MetaDataList::find(MallocMetadata *to_find)
     }
     // Will return True if to_find is nullptr and list is empty
     return (curr == to_find);
+}
+
+int MetaDataList::getSize()
+{
+    return this->size;
 }

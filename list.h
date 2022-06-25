@@ -1,6 +1,3 @@
-// heyyyyyyyy that's my list
-// it's got ton a cool stuff
-
 #include <iostream>
 #include <unistd.h>
 #include <cmath>
@@ -31,8 +28,6 @@ struct MallocMetadata
         return tip;
     }
 };
-
-typedef struct MallocMetadata MallocMetadata;
 
 class CompareBy
 {
@@ -73,15 +68,18 @@ class MetaDataList
 private:
     int size;
     CompareBy cmp;
-    MallocMetadata *head;
+    MallocMetadata *head, *tail;
     void setHead(MallocMetadata *new_head);
+    void setTail(MallocMetadata *new_tail);
 
 public:
     MetaDataList(int compare = DOUBLE);
     ~MetaDataList() = default;
     MallocMetadata *begin();
     MallocMetadata *end();
+    MallocMetadata *getLast();
     void erase(MallocMetadata *to_delete);
     void push(MallocMetadata *to_add);
     bool find(MallocMetadata *to_find);
+    int getSize();
 };
