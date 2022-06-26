@@ -220,11 +220,25 @@ void initialize()
     wilderness->next = nullptr;
     wilderness->prev = nullptr;
     // stats:
-    free_blocks++;
+    ++;
     allocated_blocks++; // total num of blocks
     meta_data_bytes += meta_size;
 
     initialized = true;
+}
+
+void eraseFreeBlock(MallocMetadata *block)
+{
+    free_list.erase(block);
+    free_bytes -= block->size - meta_size;
+    block->is_free = false;
+}
+
+void addFreeBlock(MallocMetadata *block)
+{
+    free_list.push(block);
+    free_bytes += (block->size - meta_size);
+    block->is_free = true;
 }
 
 /**
@@ -239,6 +253,22 @@ MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
 {
     previous->size += next->size - meta_size;
     previous->setTip();
+    allocated_bytes += meta_size;
+    allocated_blocks--;
+    meta_data_bytes -= meta_size;
+    return previous;
+}
+
+/**
+ * @brief merge blocks to be free
+ * updates only: alloc_bytes, alloc_blocks, meta_data_bytes
+ * @param previous
+ * @param next
+ * @return MallocMetadata*
+ */
+MallocMetadata *_mergeFree(MallocMetadata *previous, MallocMetadata *next)
+{
+    previous = _merge(previous, next);
     return previous;
 }
 
@@ -250,20 +280,24 @@ MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
  * @param which if which == 1 then next's data is copied to previous. if which == 0, opposite.
  * @return MallocMetadata* of the merged block
  */
-MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next, int which)
+MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next, int should_copy)
 {
     int next_size = next->size;
     int previous_size = previous->size;
     previous = _merge(previous, next);
-    if (which == 1)
+    if (should_copy)
     { // move next's data to previous
         std::memmove(PAYLOAD(previous), PAYLOAD(next), next_size - meta_size);
+        free_bytes -= previous->size;
     }
     else
-    { // move previous's data to next
-        std::memmove(PAYLOAD(next), PAYLOAD(previous), previous_size - meta_size);
+    { 
+        free_bytes -= next->size;
     }
 }
+
+
+MallocMetadata *_
 
 /**
  * @brief finds the closest free block to "block" by memory address
@@ -430,12 +464,7 @@ void *smalloc(size_t size)
         {
             // no splitting - no need to update the Tips
             // no need to update size
-            block->is_free = false;
-            free_list.erase(block);
-
-            // stats:
-            free_blocks--;
-            free_bytes -= (address->size - meta_size);
+            eraseFreeBlock(block);
         }
         address->is_free = false;
         return PAYLOAD(address);
@@ -479,7 +508,6 @@ void *smalloc(size_t size)
                 wilderness->is_free = false;
 
                 // stats:
-                free_blocks--;
                 free_bytes -= (wilderness->size - meta_size);
             }
         }
@@ -503,7 +531,6 @@ void *smalloc(size_t size)
             // if (was_empty)
             // {
             // }
-            free_blocks--;
             free_bytes -= (wilderness->size - addition - meta_size);
             allocated_bytes += addition;
             return PAYLOAD(wilderness);
@@ -577,18 +604,18 @@ void sfree(void *p)
         MallocMetadata *prev = _previousToWilderness();
         if (prev != nullptr) // adjacent from the back
         {
-            wilderness = _merge(prev, wilderness);
-            free_list.erase(prev);
-            free_blocks--;
-            allocated_blocks--;
-            meta_data_bytes -= meta_size;
-            free_bytes += wilderness->size;
+            // wilderness = _merge(prev, wilderness);
+            // free_list.erase(prev);
+            // allocated_blocks--;
+            // meta_data_bytes -= meta_size;
+            // free_bytes += wilderness->size;
+            eraseFreeBlock(prev);
+            wilderness = _mergeFree(prev, wilderness);
         }
         else
         {
             free_bytes += wilderness->size - meta_size;
         }
-        free_blocks++;
         wilderness->is_free = true;
         return;
     }
@@ -598,38 +625,39 @@ void sfree(void *p)
     MallocMetadata *next = _findClosestNext(meta);
     if (previous != nullptr) // adjacent from the back
     {
-        free_list.erase(meta);
-        free_list.erase(previous);
-        meta = _merge(previous, meta);
-        free_blocks--;
-        allocated_blocks--;
-        meta_data_bytes -= meta_size;
+        // free_list.erase(previous);
+        // meta = _merge(previous, meta);
+        // free_bytes -= previous->size - meta_size;
+        // allocated_bytes += meta_size;
+        // allocated_blocks--;
+        // meta_data_bytes -= meta_size;
+        eraseFreeBlock(previous);
+        wilderness = _mergeFree(previous, wilderness);
         if (next != nullptr) // also from the front
         {
-            free_list.erase(next);
-            meta = _merge(meta, next);
-            meta_data_bytes -= meta_size;
-
-            free_blocks--;
-            allocated_blocks--;
+            // free_list.erase(next);
+            // meta = _merge(meta, next);
+            // meta_data_bytes -= meta_size;
+            // free_bytes -= next->size - meta_size;
+            // allocated_bytes += meta_size;
+            // allocated_blocks--;
+            eraseFreeBlock(next);
+            wilderness = _mergeFree(next, wilderness);
         }
     }
     else
     {
         if (next != nullptr) // adjacent from the front
         {
-            free_list.erase(next);
-            free_blocks--;
-            meta = _merge(meta, next);
-            meta_data_bytes -= meta_size;
-            allocated_blocks--;
+            // free_list.erase(next);
+            // meta = _merge(meta, next);
+            // meta_data_bytes -= meta_size;
+            // allocated_blocks--;
+            eraseFreeBlock(next);
+            wilderness = _mergeFree(next, wilderness);
         }
     }
-    meta->is_free = true;
-    free_list.push(meta);
-    // stats:
-    free_blocks++;
-    free_bytes += (meta->size - meta_size);
+    addFreeBlock(meta);
 }
 
 void *srealloc(void *oldp, size_t size)
@@ -684,7 +712,7 @@ void *srealloc(void *oldp, size_t size)
             if (prev != nullptr)
             { // previous is free. merging:
                 // stats:
-                free_blocks--; // prev is gone
+
                 // free_bytes -= prev->size;
                 allocated_blocks--; // cause of the merging
                 meta_data_bytes -= meta_size;
@@ -717,7 +745,6 @@ void *srealloc(void *oldp, size_t size)
                         wilderness = new_wilderness;
 
                         // stats:
-                        free_blocks++;
                         free_bytes -= (old_wilderness->size);
                         allocated_bytes -= meta_size;
                         allocated_blocks++;
@@ -761,7 +788,6 @@ void *srealloc(void *oldp, size_t size)
             if (prev->size + meta->size >= size)
             { // then previous is enough
                 // stats:
-                free_blocks--; // prev is gone
                 // free_bytes -= prev->size;
                 allocated_blocks--; // cause of the merging
                 meta_data_bytes -= meta_size;
@@ -789,14 +815,15 @@ void *srealloc(void *oldp, size_t size)
                     free_list.push(new_block);
 
                     // stats:
-                    // free_blocks++;
+                    // ++;
                     free_bytes -= new_block->size;
                     allocated_bytes -= meta_size;
                     allocated_blocks++;
                     meta_data_bytes += meta_size;
                     sfree(new_block);
                 }
-                else {
+                else
+                {
                     free_bytes -= prev->size;
                 }
 
@@ -809,7 +836,6 @@ void *srealloc(void *oldp, size_t size)
             if (next->size + meta->size >= size)
             { // then previous is enough
                 // stats:
-                free_blocks--; // next is gone
                 free_bytes -= next->size;
                 allocated_blocks--; // cause of the merging
                 meta_data_bytes -= meta_size;
@@ -837,7 +863,7 @@ void *srealloc(void *oldp, size_t size)
                     free_list.push(new_block);
 
                     // stats:
-                    // free_blocks++;
+                    // ++;
                     // free_bytes += new_block->size - meta_size;
                     allocated_bytes -= meta_size;
                     allocated_blocks++;
@@ -854,7 +880,6 @@ void *srealloc(void *oldp, size_t size)
             if (next->size + meta->size + prev->size >= size)
             { // then merge all 3
                 // stats:
-                free_blocks -= 2;
                 free_bytes -= (next->size + prev->size);
                 allocated_blocks -= 2;
                 meta_data_bytes -= 2 * meta_size;
@@ -884,7 +909,7 @@ void *srealloc(void *oldp, size_t size)
                     free_list.push(new_block);
 
                     // stats:
-                    // free_blocks++;
+                    // ++;
                     // free_bytes += new_block->size - meta_size;
                     allocated_bytes -= meta_size;
                     allocated_blocks++;
@@ -899,7 +924,6 @@ void *srealloc(void *oldp, size_t size)
             {
                 // all 3 weren't enough. we'll connect all 3 and enlrge wilderness:
                 // stats:
-                free_blocks -= 2;
                 free_bytes -= (next->size + prev->size);
                 allocated_blocks -= 2;
                 meta_data_bytes -= 2 * meta_size;
@@ -928,7 +952,6 @@ void *srealloc(void *oldp, size_t size)
         if (next != nullptr && next == wilderness)
         {
             // stats:
-            free_blocks--; // next is gone
             free_bytes -= next->size;
             allocated_blocks--; // cause of the merging
             meta_data_bytes -= meta_size;
@@ -963,7 +986,7 @@ void *srealloc(void *oldp, size_t size)
 
 size_t _num_free_blocks()
 {
-    return free_blocks;
+    return free_list.getSize() + !wilderness->is_free;
 }
 size_t _num_free_bytes()
 {
