@@ -41,12 +41,22 @@ MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
  * to the new merged one
  * @param previous
  * @param next
+ * @param which if which == 1 then next's data is copied to previous. if which == 0, opposite.
  * @return MallocMetadata* of the merged block
  */
-MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next)
+MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next, int which)
 {
+    int next_size = next->size;
+    int previous_size = previous->size;
     previous = _merge(previous, next);
-    std::memmove(next - sizeof(MallocTip), next + sizeof(MallocMetadata), next->size - meta_size);
+    if (which == 1)
+    { //move next's data to previous
+        std::memmove(previous + offset, next + offset, next_size - meta_size);
+    }
+    else
+    { //move previous's data to next
+        std::memmove(next + offset, previous + offset, previous_size - meta_size);
+    }
 }
 
 /**
@@ -448,7 +458,7 @@ void *srealloc(void *oldp, size_t size)
                 // update list:
                 free_list.erase(prev);
 
-                wilderness = _merge(prev, meta);
+                wilderness = _mergeAndCopy(prev, wilderness, 1);
                 wilderness->is_free = false;
 
                 if (wilderness->size >= size)
@@ -524,7 +534,7 @@ void *srealloc(void *oldp, size_t size)
                 free_list.erase(prev);
                 // free_list.erase(meta); - no need because not in the free list
 
-                meta = _merge(prev, meta);
+                meta = _mergeAndCopy(prev, meta, 1);
                 meta->is_free = false;
 
                 int remaining = meta->size - size;
@@ -613,7 +623,7 @@ void *srealloc(void *oldp, size_t size)
                 free_list.erase(next);
 
                 // merge:
-                meta = _merge(prev, meta);
+                meta = _mergeAndCopy(prev, meta, 1);
                 meta = _merge(meta, next);
                 meta->is_free = false;
 
@@ -654,7 +664,7 @@ void *srealloc(void *oldp, size_t size)
 
                 // update list:
                 free_list.erase(prev);
-                meta = _merge(prev, meta);
+                meta = _mergeAndCopy(prev, meta, 1);
                 meta->is_free = false;
 
                 int addition = size - (meta->size + wilderness->size);
