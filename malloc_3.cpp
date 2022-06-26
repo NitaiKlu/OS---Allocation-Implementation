@@ -451,11 +451,35 @@ void *srealloc(void *oldp, size_t size)
                 wilderness = _merge(prev, meta);
                 wilderness->is_free = false;
 
-                if (prev->size + wilderness->size >= size)
+                if (wilderness->size >= size)
                 { // then previous was enough
                     // need to check if spiltable**************************************
+                    int remaining = wilderness->size - size;
+                    if (isSplitable(remaining))
+                    {
+                        MallocMetadata *old_wilderness = wilderness;
+                        old_wilderness->size = size;
+                        old_wilderness->is_free = false;
+                        // should assign new wilderness and keep it free
+                        MallocMetadata *new_wilderness = (MallocMetadata *)(wilderness + size);
+                        *new_wilderness = MallocMetadata(remaining);
+                        new_wilderness->is_free = true;
+
+                        // create new tip and change the old one:
+                        MallocTip *middle_tip = old_wilderness->setTip();
+                        MallocTip *edge_tip = new_wilderness->setTip();
+
+                        // update wilderness
+                        wilderness = new_wilderness;
+
+                        // stats:
+                        free_blocks++;
+                        free_bytes -= (size - meta_size);
+                        allocated_blocks++;
+                        meta_data_bytes += meta_size;
+                        return old_wilderness + offset;
+                    }
                     return wilderness + offset;
-                    
                 }
                 // enlarge wilderness:
                 int addition = size - wilderness->size;
@@ -500,10 +524,33 @@ void *srealloc(void *oldp, size_t size)
                 free_list.erase(prev);
                 // free_list.erase(meta); - no need because not in the free list
 
-                prev = _merge(prev, meta);
-                prev->is_free = false;
+                meta = _merge(prev, meta);
+                meta->is_free = false;
 
-                return prev + offset;
+                int remaining = meta->size - size;
+                if (isSplitable(remaining))
+                { // split what remains
+                    meta->size = size;
+                    MallocMetadata *new_block = (MallocMetadata *)(meta + meta->size);
+                    *new_block = MallocMetadata(remaining);
+                    new_block->is_free = true;
+
+                    // tip update:
+                    MallocTip *middle_tip = meta->setTip();
+                    MallocTip *edge_tip = new_block->setTip();
+
+                    // list update:
+                    free_list.push(new_block);
+
+                    // stats:
+                    // free_blocks++;
+                    // free_bytes += new_block->size - meta_size;
+                    allocated_blocks++;
+                    meta_data_bytes += meta_size;
+                    sfree(new_block);
+                }
+
+                return meta + offset;
             }
         }
         if (next != nullptr)
@@ -521,8 +568,31 @@ void *srealloc(void *oldp, size_t size)
                 free_list.erase(next);
                 // free_list.erase(meta); - no need because not in the free list
 
-                next = _merge(meta, next);
-                next->is_free = false;
+                meta = _merge(meta, next);
+                meta->is_free = false;
+
+                int remaining = meta->size - size;
+                if (isSplitable(remaining))
+                { // split what remains
+                    meta->size = size;
+                    MallocMetadata *new_block = (MallocMetadata *)(meta + meta->size);
+                    *new_block = MallocMetadata(remaining);
+                    new_block->is_free = true;
+
+                    // tip update:
+                    MallocTip *middle_tip = meta->setTip();
+                    MallocTip *edge_tip = new_block->setTip();
+
+                    // list update:
+                    free_list.push(new_block);
+
+                    // stats:
+                    // free_blocks++;
+                    // free_bytes += new_block->size - meta_size;
+                    allocated_blocks++;
+                    meta_data_bytes += meta_size;
+                    sfree(new_block);
+                }
 
                 return next + offset;
             }
@@ -563,10 +633,11 @@ void *srealloc(void *oldp, size_t size)
                     free_list.push(new_block);
 
                     // stats:
-                    free_blocks++;
-                    free_bytes += new_block->size - meta_size;
+                    // free_blocks++;
+                    // free_bytes += new_block->size - meta_size;
                     allocated_blocks++;
                     meta_data_bytes += meta_size;
+                    sfree(new_block);
                 }
 
                 return meta + offset;
