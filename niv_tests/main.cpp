@@ -606,7 +606,7 @@ string tests_string[NUM_TESTS] = {
 
 int main(int argc, char *argv[])
 {
-    /*
+    // /*
     for (int i = 0; i < NUM_TESTS; i++)
     {
         cout << "running " << tests_string[i] << "... ";
@@ -682,9 +682,9 @@ int main(int argc, char *argv[])
             }
         }
     }
-    */
+    // */
 
-    tests[4]();
+    // tests[4]();
 
     return 0;
 }
