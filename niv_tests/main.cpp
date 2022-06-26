@@ -137,8 +137,9 @@ void test_challenge_1()
     Stats s;
     // test head and last
     void *p1 = smalloc(3000); // [40,3000,al] ->
-    sfree(p1);                // [40,3000,f] ->
-
+    s.set();
+    sfree(p1); // [40,3000,f] ->
+    s.set();
     void *p2 = smalloc(32); // [40,32,al][40,2928,f] ->
     s.set();
     size_t expected_num_free_bytes = 3000 - 32 - 1 * MD_SIZE;
@@ -175,9 +176,13 @@ void test_challenge_1_2()
     Stats s;
 
     void *p1 = smalloc(1000);
+    s.set();
     void *p2 = smalloc(1000);
+    s.set();
     void *p3 = smalloc(1000);
+    s.set();
     sfree(p3); // [40,1000,al][40,1000,f][40,1000,al]
+    s.set();
 
     void *p4 = smalloc(992); // [40,1000,al][40,1000,a][40,1000,al]
 
@@ -244,8 +249,10 @@ void test_challenge_2()
     void *p8 = smalloc(1000);
     void *p9 = smalloc(1000);  //
     void *p10 = smalloc(1000); //
+    s.set();
 
     sfree(p1);
+    s.set();
     sfree(p2); // [40,1000,al][40,1000,al]...[40,1000,al][40,2040,f]
     s.set();
     s.compare(1, 2000 + 1 * MD_SIZE, 9, al_size + 1 * MD_SIZE, 9 * MD_SIZE, MD_SIZE, __LINE__);
@@ -256,12 +263,14 @@ void test_challenge_2()
     s.set();
     s.compare(2, 5000 + 3 * MD_SIZE, 7, al_size + 3 * MD_SIZE, 7 * MD_SIZE, MD_SIZE, __LINE__);
 
-    sfree(p9);  //       p3          p7         p8         p1+p2     p9+p10    p4+p5+p6
+    sfree(p9); //       p3          p7         p8         p1+p2     p9+p10    p4+p5+p6
+    s.set();
     sfree(p10); // [40,1000,al][40,1000,al][40,1000,al][40,2040,f][40,2040,f][40,3080,f]
     s.set();
     s.compare(3, 7000 + 4 * MD_SIZE, 6, al_size + 4 * MD_SIZE, 6 * MD_SIZE, MD_SIZE, __LINE__);
 
     sfree(p7); //       p3       p1+p2    p4+..+p10
+    s.set();
     sfree(p8); // [40,1000,al][40,2040,f][40,7240,f]
     s.set();
     s.compare(2, 9000 + 7 * MD_SIZE, 3, al_size + 7 * MD_SIZE, 3 * MD_SIZE, MD_SIZE, __LINE__);
@@ -606,8 +615,11 @@ string tests_string[NUM_TESTS] = {
 
 int main(int argc, char *argv[])
 {
-    // /*
-    for (int i = 0; i < NUM_TESTS; i++)
+    int how_many_tests = 8;
+
+    how_many_tests = (how_many_tests > NUM_TESTS) ? NUM_TESTS : how_many_tests;
+    int i = 0;
+    for (; i < how_many_tests - 1; i++)
     {
         cout << "running " << tests_string[i] << "... ";
         fflush(stdout);
@@ -667,7 +679,7 @@ int main(int argc, char *argv[])
                 int exit_code = WEXITSTATUS(status);
                 if (exit_code == 0)
                 {
-                    cout << "PASSED." << endl;
+                    cout << "[" << i + 1 << "] PASSED." << endl;
                 }
                 else if (WEXITSTATUS(status) != 1)
                 {
@@ -682,9 +694,9 @@ int main(int argc, char *argv[])
             }
         }
     }
-    // */
-
-    // tests[4]();
-
+    cout << "Debuggable: [" << i + 1 << "] " << endl;
+    cout << "running " << tests_string[i] << "... ";
+    tests[i]();
+    cout << "PASSED." << endl;
     return 0;
 }

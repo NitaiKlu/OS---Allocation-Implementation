@@ -126,6 +126,7 @@ void MetaDataList::push(MallocMetadata *to_add)
     if (!cmp(*curr, *to_add))
     {
         setHead(to_add);
+        to_add->prev = nullptr;
         to_add->next = curr;
         curr->prev = to_add;
         setTail(curr);
@@ -256,11 +257,12 @@ void addFreeBlock(MallocMetadata *block)
  */
 MallocMetadata *_merge(MallocMetadata *previous, MallocMetadata *next)
 {
-    previous->size += next->size - meta_size;
+    previous->size += next->size;
     previous->setTip();
     allocated_bytes += meta_size;
     allocated_blocks--;
     meta_data_bytes -= meta_size;
+    // free_bytes += meta_size; // Maybe only in mergeFree?
     return previous;
 }
 
@@ -275,6 +277,7 @@ MallocMetadata *_mergeFree(MallocMetadata *previous, MallocMetadata *next)
 {
     previous = _merge(previous, next);
     previous->is_free = true;
+    next->is_free = true;
     return previous;
 }
 
@@ -486,8 +489,10 @@ void *smalloc(size_t size)
         {
             if (isSplitable(wilderness->size - size))
             {
+                eraseFreeBlock(wilderness);
                 MallocMetadata *old_wilderness = wilderness;
                 wilderness = _split(wilderness, wilderness->size - size);
+                addFreeBlock(wilderness);
                 return PAYLOAD(old_wilderness);
             }
             else
@@ -598,11 +603,7 @@ void sfree(void *p)
             eraseFreeBlock(prev);
             wilderness = _mergeFree(prev, wilderness);
         }
-        else
-        {
-            free_bytes += wilderness->size - meta_size;
-        }
-        wilderness->is_free = true;
+        addFreeBlock(wilderness);
         return;
     }
     // if we get here we are not freeing wilderness
@@ -618,7 +619,7 @@ void sfree(void *p)
         // allocated_blocks--;
         // meta_data_bytes -= meta_size;
         eraseFreeBlock(previous);
-        wilderness = _mergeFree(previous, wilderness);
+        meta = _mergeFree(previous, meta);
         if (next != nullptr) // also from the front
         {
             // free_list.erase(next);
@@ -628,7 +629,11 @@ void sfree(void *p)
             // allocated_bytes += meta_size;
             // allocated_blocks--;
             eraseFreeBlock(next);
-            wilderness = _mergeFree(next, wilderness);
+            meta = _mergeFree(meta, next);
+            if (next == wilderness)
+            {
+                wilderness = meta;
+            }
         }
     }
     else
@@ -640,7 +645,7 @@ void sfree(void *p)
             // meta_data_bytes -= meta_size;
             // allocated_blocks--;
             eraseFreeBlock(next);
-            wilderness = _mergeFree(next, wilderness);
+            meta = _mergeFree(meta, next);
         }
     }
     addFreeBlock(meta);
@@ -752,7 +757,6 @@ void *srealloc(void *oldp, size_t size)
                 eraseFreeBlock(prev);
 
                 meta = _mergeAndCopy(prev, meta, 1);
-                meta->is_free = false;
                 int remaining = meta->size - size;
 
                 if (isSplitable(remaining))
@@ -894,7 +898,7 @@ void *srealloc(void *oldp, size_t size)
 
 size_t _num_free_blocks()
 {
-    return free_list.getSize() + !wilderness->is_free;
+    return free_list.getSize() + wilderness->is_free;
 }
 size_t _num_free_bytes()
 {
