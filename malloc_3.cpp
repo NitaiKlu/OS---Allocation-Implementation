@@ -3,10 +3,189 @@
 #include <cmath>
 #include <cstring>
 #include <sys/mman.h>
-#include "list.h"
 #define SPLIT_SIZE 128
 #define LARGE_MEM 128 * 1024
-using std::list;
+#define DOUBLE 0
+#define ADDRESS 1
+
+struct MallocMetadata;
+struct MallocTip
+{
+    MallocMetadata *front;
+    MallocTip(MallocMetadata *front) : front(front){};
+};
+struct MallocMetadata
+{
+    size_t size;
+    bool is_free;
+    MallocMetadata *next;
+    MallocMetadata *prev;
+    MallocMetadata(size_t _size = 0) : size(_size), is_free(true){};
+    MallocTip *setTip()
+    {
+        MallocTip *tip = (MallocTip *)(this + this->size - sizeof(MallocTip));
+        *tip = MallocTip(this);
+        return tip;
+    }
+};
+class CompareBy
+{
+    int sort_type;
+
+public:
+    CompareBy(int type) : sort_type(type)
+    {
+        if (sort_type > 1 || sort_type < 0)
+        {
+            std::cout << "WRONG Compare type" << std::endl;
+        }
+    }
+    ~CompareBy() = default;
+    bool operator()(const MallocMetadata &first, const MallocMetadata &second)
+    {
+        if (sort_type == DOUBLE)
+        {
+            if (first.size < second.size)
+            {
+                return true;
+            }
+            if (first.size > second.size)
+            {
+                return false;
+            }
+        }
+        //  sizes are equal/ sort_type is address, we compare addresses:
+        if (&first < &second)
+            return true;
+
+        return false;
+    }
+};
+class MetaDataList
+{
+private:
+    int size;
+    CompareBy cmp;
+    MallocMetadata *head, *tail;
+    void setHead(MallocMetadata *new_head);
+    void setTail(MallocMetadata *new_tail);
+
+public:
+    MetaDataList(int compare = DOUBLE);
+    ~MetaDataList() = default;
+    MallocMetadata *begin();
+    MallocMetadata *end();
+    MallocMetadata *getLast();
+    void erase(MallocMetadata *to_delete);
+    void push(MallocMetadata *to_add);
+    bool find(MallocMetadata *to_find);
+    int getSize();
+};
+MetaDataList::MetaDataList(int compare)
+    : size(0), cmp(compare), head(nullptr), tail(nullptr)
+{
+}
+void MetaDataList::setHead(MallocMetadata *new_head)
+{
+    this->head = new_head;
+}
+void MetaDataList::setTail(MallocMetadata *new_tail)
+{
+    this->tail = new_tail;
+}
+MallocMetadata *MetaDataList::begin()
+{
+    return this->head;
+}
+MallocMetadata *MetaDataList::end()
+{
+    return nullptr;
+}
+MallocMetadata *MetaDataList::getLast()
+{
+    return this->tail;
+}
+void MetaDataList::push(MallocMetadata *to_add)
+{
+    MallocMetadata *curr, *next;
+    curr = begin();
+    this->size++;
+    // List is empty
+    if (!curr)
+    {
+        to_add->prev = nullptr;
+        to_add->next = nullptr;
+        setHead(to_add);
+        setTail(to_add);
+        return;
+    }
+    // Check if new node should be the Head
+    if (!cmp(*curr, *to_add))
+    {
+        setHead(to_add);
+        to_add->next = curr;
+        curr->prev = to_add;
+        setTail(curr);
+        return;
+    }
+    // Otherwise- look for right place
+    next = curr->next;
+    while (next && cmp(*next, *to_add))
+    {
+        curr = next;
+        next = next->next;
+    }
+    // New node will be the last
+    if (!next)
+    {
+        curr->next = to_add;
+        to_add->next = nullptr;
+        to_add->prev = curr;
+        setTail(to_add);
+        return;
+    }
+    // New node should be between curr and next
+    curr->next = to_add;
+    to_add->prev = curr;
+    to_add->next = next;
+    next->prev = to_add;
+}
+void MetaDataList::erase(MallocMetadata *to_delete)
+{
+    MallocMetadata *prev = to_delete->prev;
+    MallocMetadata *next = to_delete->next;
+    if (prev)
+    {
+        prev->next = next;
+    }
+    else
+    {
+        setHead(next);
+    }
+    if (next)
+    {
+        next->prev = prev;
+    }
+    else
+    {
+        setTail(prev);
+    }
+    this->size--;
+}
+bool MetaDataList::find(MallocMetadata *to_find)
+{
+    MallocMetadata *curr = begin();
+    while (curr && curr != to_find && curr->size <= to_find->size)
+    {
+        curr = curr->next;
+    }
+    // Will return True if to_find is nullptr and list is empty
+    return (curr == to_find);
+}
+int MetaDataList::getSize()
+{
+    return this->size;
+}
 
 const long max_size = std::pow(10, 8);
 
@@ -14,12 +193,27 @@ const size_t meta_size = sizeof(MallocMetadata) + sizeof(MallocTip);
 const size_t offset = sizeof(MallocMetadata);
 MetaDataList free_list = MetaDataList(DOUBLE);
 MetaDataList mmap_list = MetaDataList(DOUBLE);
-MallocMetadata *wilderness = &MallocMetadata(0); // may be free and may not. Thus - not in free_list!
+MallocMetadata *wilderness; // may be free and may not. Thus - not in free_list!
 size_t free_blocks = 0;
 size_t free_bytes = 0;
 size_t allocated_blocks = 0; // total num of blocks
 size_t allocated_bytes = 0;
 size_t meta_data_bytes = 0;
+bool initialized = false;
+
+void initialize()
+{
+    void *ptr = sbrk(meta_size);
+    if (ptr == (void *)(-1))
+    {
+        return;
+    }
+    wilderness = (MallocMetadata *)ptr;
+    wilderness->size = meta_size;
+    wilderness->is_free = true;
+    wilderness->next = nullptr;
+    wilderness->prev = nullptr;
+}
 
 /**
  * @brief merges 2 adjacent blocks. assumes previous is indeed adjacent to next from the left.
@@ -152,6 +346,8 @@ void *smalloc(size_t size)
     {
         return nullptr;
     }
+
+    if(!initialized) initialize();
 
     if (size > LARGE_MEM) // mmap size
     {
@@ -317,6 +513,9 @@ void sfree(void *p)
 {
     if (!p)
         return;
+
+    if(!initialized) initialize();
+
     MallocMetadata *meta = ((MallocMetadata *)(p - meta_size));
     if (meta->is_free)
         return;
@@ -398,6 +597,9 @@ void *srealloc(void *oldp, size_t size)
     {
         return nullptr;
     }
+
+    if(!initialized) initialize();
+
     MallocMetadata *meta = (MallocMetadata *)(oldp - offset);
     if (meta->size > LARGE_MEM) // mmap allocation
     {
@@ -425,7 +627,7 @@ void *srealloc(void *oldp, size_t size)
         if (err != 0)
         {
             perror("unmapping failed.\n");
-            return;
+            return nullptr;
         }
         return new_mmap + offset;
     }
