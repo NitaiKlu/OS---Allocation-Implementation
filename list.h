@@ -1,8 +1,10 @@
+#ifndef _LIST_H
+#define _LIST_H
+
 #include <iostream>
 #include <unistd.h>
 #include <cmath>
 #include <cstring>
-#include <list>
 #define DOUBLE 0
 #define ADDRESS 1
 
@@ -83,3 +85,5 @@ public:
     bool find(MallocMetadata *to_find);
     int getSize();
 };
+
+#endif
