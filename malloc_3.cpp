@@ -11,6 +11,7 @@ using std::list;
 const long max_size = std::pow(10, 8);
 
 const size_t meta_size = sizeof(MallocMetadata) + sizeof(MallocTip);
+const size_t offset = sizeof(MallocMetadata);
 MetaDataList free_list = MetaDataList(DOUBLE);
 MetaDataList mmap_list = MetaDataList(DOUBLE);
 MallocMetadata *wilderness = &MallocMetadata(0); // may be free and may not. Thus - not in free_list!
@@ -166,7 +167,7 @@ void *smalloc(size_t size)
 
         mmap_list.push(new_mmap);
         // should update stats??***********************
-        return new_mmap + sizeof(MallocMetadata);
+        return new_mmap + offset;
     }
 
     // metaData size + 8-multiple padding
@@ -202,16 +203,16 @@ void *smalloc(size_t size)
         else
         {
             // no splitting - no need to update the Tips
-            block->size = size;
+            // no need to update size
             block->is_free = false;
             free_list.erase(block);
 
             // stats:
             free_blocks--;
         }
-        free_bytes -= (size - meta_size);
+        free_bytes -= (address->size - meta_size);
         address->is_free = false;
-        return address + meta_size;
+        return address + offset;
     }
     // reaching here means we couldn't find a large enough spot in the free_list
     // let's try wilderness instead:
@@ -239,13 +240,13 @@ void *smalloc(size_t size)
                 // stats:
                 free_bytes -= (size - meta_size);
                 allocated_blocks++;
-                allocated_bytes += (wilderness->size - size);
+                // allocated_bytes += (wilderness->size - size); - no! since no new bytes were allocated
                 meta_data_bytes += meta_size;
-                return old_wilderness + meta_size;
+                return old_wilderness + offset;
             }
             else
             {
-                // no splitting - no need to update the Tips
+                // no splitting - no need to update the Tips or size
 
                 wilderness->is_free = false;
 
@@ -257,7 +258,8 @@ void *smalloc(size_t size)
         else
         {
             // need to sbrk()
-            void *ptr = sbrk(size - wilderness->size);
+            int addition = size - wilderness->size;
+            void *ptr = sbrk(addition);
             if (ptr == (void *)(-1))
             {
                 return nullptr;
@@ -270,9 +272,9 @@ void *smalloc(size_t size)
 
             // stats:
             free_blocks--;
-            free_bytes -= (size - meta_size);
-            allocated_bytes += (size - wilderness->size);
-            return wilderness + meta_size;
+            free_bytes -= (wilderness->size - meta_size);
+            allocated_bytes += addition;
+            return wilderness + offset;
         }
     }
     else // need to assign new wilderness and use it
@@ -298,7 +300,7 @@ void *smalloc(size_t size)
         meta_data_bytes += meta_size;
     }
     wilderness->is_free = false;
-    return wilderness + meta_size;
+    return wilderness + offset;
 }
 
 void *scalloc(size_t num, size_t size)
@@ -341,10 +343,12 @@ void sfree(void *p)
         {
             wilderness = _merge(prev, wilderness);
             free_list.erase(prev);
+            free_blocks--;
             free_bytes += wilderness->size;
             allocated_blocks--;
             meta_data_bytes -= meta_size;
         }
+        free_blocks++;
         wilderness->is_free = true;
         return;
     }
@@ -357,10 +361,17 @@ void sfree(void *p)
         free_list.erase(meta);
         free_list.erase(previous);
         meta = _merge(previous, meta);
+        free_blocks--;
+        allocated_blocks--;
+        meta_data_bytes -= meta_size;
         if (next != nullptr) // also from the front
         {
             free_list.erase(next);
             meta = _merge(meta, next);
+            meta_data_bytes -= meta_size;
+
+            free_blocks--;
+            allocated_blocks--;
         }
     }
     else
@@ -368,7 +379,10 @@ void sfree(void *p)
         if (next != nullptr) // adjacent from the front
         {
             free_list.erase(next);
+            free_blocks--;
             meta = _merge(meta, next);
+            meta_data_bytes -= meta_size;
+            allocated_blocks--;
         }
     }
     meta->is_free = true;
@@ -384,44 +398,243 @@ void *srealloc(void *oldp, size_t size)
     {
         return nullptr;
     }
-    MallocMetadata *meta = (MallocMetadata *)(oldp);
+    MallocMetadata *meta = (MallocMetadata *)(oldp - offset);
     if (meta->size > LARGE_MEM) // mmap allocation
     {
         size = padd_size_no_tip(size);
         if (size <= meta->size) // check if this is the right way or need to check only if size == meta.size
-            return meta;
+            return meta + offset;
+
+        // allocating new mmap:
+        void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, 0, 0);
+        if (ptr == MAP_FAILED)
+        {
+            return nullptr;
+        }
+        MallocMetadata *new_mmap = (MallocMetadata *)(ptr);
+        *new_mmap = MallocMetadata(size);
+        new_mmap->is_free = false;
+        mmap_list.push(new_mmap);
+
+        // moving data:
+        std::memmove(new_mmap + offset, meta + offset, meta->size - offset);
+
+        // deleting current
+        mmap_list.erase(meta);
+        int err = munmap(meta, meta->size);
+        if (err != 0)
+        {
+            perror("unmapping failed.\n");
+            return;
+        }
+        return new_mmap + offset;
     }
     else // sbrk allocation
     {
         size = padd_size(size);
         if (size <= meta->size)
-            return meta;
+            return meta + offset;
         if (meta == wilderness)
         {
-        }
-        else
-        {
-            MallocMetadata *prev = _findClosestPrevious(meta);
-            MallocMetadata *next = _findClosestNext(meta);
+            MallocMetadata *prev = _previousToWilderness();
             if (prev != nullptr)
-            { // previous is free
-                // try to merge:
-                if (prev->size + meta->size > size)
-                { // then previous is enough
-                    free_list.erase(prev);
-                    free_list.erase(meta);
-                    _merge(prev, meta);
-                    prev->is_free = false;
-                    // stats:
-                    free_blocks--;
+            { // previous is free. merging:
+                // stats:
+                free_blocks--; // prev is gone
+                free_bytes -= prev->size;
+                allocated_blocks--; // cause of the merging
+                meta_data_bytes -= meta_size;
 
-                    return prev;
+                // update list:
+                free_list.erase(prev);
+
+                wilderness = _merge(prev, meta);
+                wilderness->is_free = false;
+
+                if (prev->size + wilderness->size >= size)
+                { // then previous was enough
+                    // need to check if spiltable**************************************
+                    return wilderness + offset;
+                    
                 }
+                // enlarge wilderness:
+                int addition = size - wilderness->size;
+                void *ptr = sbrk(addition);
+                if (ptr == (void *)(-1))
+                {
+                    return nullptr;
+                }
+                allocated_bytes += addition;
+                wilderness->size += addition;
+
+                return wilderness + offset;
             }
-            if (next != nullptr)
-            { // next is free
+
+            // enlarge wilderness:
+            int addition = size - wilderness->size;
+            void *ptr = sbrk(addition);
+            if (ptr == (void *)(-1))
+            {
+                return nullptr;
+            }
+            allocated_bytes += addition;
+            wilderness->size += addition;
+
+            return wilderness + offset;
+        }
+
+        MallocMetadata *prev = _findClosestPrevious(meta);
+        MallocMetadata *next = _findClosestNext(meta);
+        if (prev != nullptr)
+        { // previous is free
+            // try to merge:
+            if (prev->size + meta->size >= size)
+            { // then previous is enough
+                // stats:
+                free_blocks--; // prev is gone
+                free_bytes -= prev->size;
+                allocated_blocks--; // cause of the merging
+                meta_data_bytes -= meta_size;
+
+                // update list:
+                free_list.erase(prev);
+                // free_list.erase(meta); - no need because not in the free list
+
+                prev = _merge(prev, meta);
+                prev->is_free = false;
+
+                return prev + offset;
             }
         }
+        if (next != nullptr)
+        { // next is free
+            // try to merge:
+            if (next->size + meta->size >= size)
+            { // then previous is enough
+                // stats:
+                free_blocks--; // next is gone
+                free_bytes -= next->size;
+                allocated_blocks--; // cause of the merging
+                meta_data_bytes -= meta_size;
+
+                // update list:
+                free_list.erase(next);
+                // free_list.erase(meta); - no need because not in the free list
+
+                next = _merge(meta, next);
+                next->is_free = false;
+
+                return next + offset;
+            }
+        }
+        // reaching here- next and previous were not enough or not adjacent!
+        if (next != nullptr && prev != nullptr)
+        { // both adjacent
+            if (next->size + meta->size + prev->size >= size)
+            { // then merge all 3
+                // stats:
+                free_blocks -= 2;
+                free_bytes -= (next->size + prev->size);
+                allocated_blocks -= 2;
+                meta_data_bytes -= 2 * meta_size;
+
+                // update list:
+                free_list.erase(prev);
+                free_list.erase(next);
+
+                // merge:
+                meta = _merge(prev, meta);
+                meta = _merge(meta, next);
+                meta->is_free = false;
+
+                int remaining = meta->size - size;
+                if (isSplitable(remaining))
+                { // split what remains
+                    meta->size = size;
+                    MallocMetadata *new_block = (MallocMetadata *)(meta + meta->size);
+                    *new_block = MallocMetadata(remaining);
+                    new_block->is_free = true;
+
+                    // tip update:
+                    MallocTip *middle_tip = meta->setTip();
+                    MallocTip *edge_tip = new_block->setTip();
+
+                    // list update:
+                    free_list.push(new_block);
+
+                    // stats:
+                    free_blocks++;
+                    free_bytes += new_block->size - meta_size;
+                    allocated_blocks++;
+                    meta_data_bytes += meta_size;
+                }
+
+                return meta + offset;
+            }
+
+            if (next == wilderness)
+            {
+                // all 3 weren't enough. we'll connect all 3 and enlrge wilderness:
+                // stats:
+                free_blocks -= 2;
+                free_bytes -= (next->size + prev->size);
+                allocated_blocks -= 2;
+                meta_data_bytes -= 2 * meta_size;
+
+                // update list:
+                free_list.erase(prev);
+                meta = _merge(prev, meta);
+                meta->is_free = false;
+
+                int addition = size - (meta->size + wilderness->size);
+                void *ptr = sbrk(addition);
+                if (ptr == (void *)(-1))
+                {
+                    return nullptr;
+                }
+                allocated_bytes += addition;
+
+                wilderness->size += addition;
+                wilderness = _merge(meta, wilderness);
+                wilderness->is_free = false;
+
+                return wilderness + offset;
+            }
+        }
+
+        if (next != nullptr && next == wilderness)
+        {
+            // stats:
+            free_blocks--; // next is gone
+            free_bytes -= next->size;
+            allocated_blocks--; // cause of the merging
+            meta_data_bytes -= meta_size;
+
+            int addition = size - (meta->size + wilderness->size);
+            void *ptr = sbrk(addition);
+            if (ptr == (void *)(-1))
+            {
+                return nullptr;
+            }
+            allocated_bytes += addition;
+
+            wilderness->size += addition;
+            wilderness = _merge(meta, wilderness);
+            wilderness->is_free = false;
+
+            return wilderness + offset;
+        }
+
+        // even all merging 3 adjacent didn't work :(
+        // finding a block in the free_list or allocating new if necessary:
+        MallocMetadata *sweet_spot = (MallocMetadata *)smalloc(size);
+        if (meta != nullptr)
+        {
+            sfree(meta);
+            return sweet_spot + offset;
+        }
+        perror("no spot was found! problems with smalloc?");
+        return nullptr;
     }
 }
 
