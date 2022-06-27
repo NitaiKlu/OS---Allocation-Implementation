@@ -277,7 +277,7 @@ MallocMetadata *_mergeFree(MallocMetadata *previous, MallocMetadata *next)
 {
     previous = _merge(previous, next);
     previous->is_free = true;
-    next->is_free = true;
+    // next->is_free = true;
     return previous;
 }
 
@@ -297,11 +297,11 @@ MallocMetadata *_mergeAndCopy(MallocMetadata *previous, MallocMetadata *next, in
     if (should_copy)
     { // move next's data to previous
         std::memmove(PAYLOAD(previous), PAYLOAD(next), next_size - meta_size);
-        free_bytes -= previous->size;
+        // free_bytes -= previous->size;
     }
     else
     {
-        free_bytes -= next->size;
+        // free_bytes -= next->size;
     }
     previous->is_free = false;
     return previous;
@@ -431,9 +431,9 @@ size_t padd_size_no_tip(size_t size)
     return (full_size / 8 + 1) * 8;
 }
 
-bool isSplitable(const size_t remainder)
+bool isSplitable(const int remainder)
 {
-    return remainder >= SPLIT_SIZE + meta_size;
+    return ((int)(remainder - meta_size) >= SPLIT_SIZE);
 }
 
 void *smalloc(size_t size)
@@ -572,8 +572,8 @@ void sfree(void *p)
         initialize();
 
     MallocMetadata *meta = ((MallocMetadata *)(p - offset));
-    if (meta->is_free)
-        return;
+    // if (meta->is_free)
+    //     return;
 
     // check and handle if mmapped
     if (meta->size > LARGE_MEM)
@@ -653,6 +653,7 @@ void sfree(void *p)
 
 void *srealloc(void *oldp, size_t size)
 {
+    size_t og_size = size;
     if (size == 0 || size > max_size)
     {
         return nullptr;
@@ -695,8 +696,18 @@ void *srealloc(void *oldp, size_t size)
     else // sbrk allocation
     {
         size = padd_size(size);
-        if (size <= meta->size)
+        if (size <= meta->size) // Can re-use same block
+        {
+            int remaining = meta->size - size;
+
+            if (isSplitable(remaining))
+            { // split what remains
+                MallocMetadata *new_block = _split(meta, remaining);
+                sfree((PAYLOAD(new_block)));
+            }
+
             return PAYLOAD(meta);
+        }
         if (meta == wilderness)
         {
             MallocMetadata *prev = _previousToWilderness();
@@ -715,9 +726,10 @@ void *srealloc(void *oldp, size_t size)
                     { // split what remains
                         MallocMetadata *old_wilderness = wilderness;
                         wilderness = _split(meta, remaining);
+                        addFreeBlock(wilderness);
                         return (PAYLOAD(old_wilderness));
                     }
-                    free_bytes -= (wilderness->size - meta_size);
+                    // free_bytes -= (wilderness->size - meta_size);
                     return PAYLOAD(wilderness);
                 }
                 // enlarge wilderness:
@@ -745,7 +757,7 @@ void *srealloc(void *oldp, size_t size)
 
             return PAYLOAD(wilderness);
         }
-
+        // Current block is not large enough and he's not wilderness
         MallocMetadata *prev = _findClosestPrevious(meta);
         MallocMetadata *next = _findClosestNext(meta);
         if (prev != nullptr)
@@ -757,6 +769,7 @@ void *srealloc(void *oldp, size_t size)
                 eraseFreeBlock(prev);
 
                 meta = _mergeAndCopy(prev, meta, 1);
+
                 int remaining = meta->size - size;
 
                 if (isSplitable(remaining))
@@ -769,7 +782,7 @@ void *srealloc(void *oldp, size_t size)
             }
         }
         if (next != nullptr)
-        { // next is free
+        { 
             // try to merge:
             if (next->size + meta->size >= size)
             { // then next is enough
@@ -796,6 +809,7 @@ void *srealloc(void *oldp, size_t size)
                     { // split what remains
                         MallocMetadata *old_wilderness = wilderness;
                         wilderness = _split(meta, remaining);
+                        addFreeBlock(wilderness);
                         return (PAYLOAD(old_wilderness));
                     }
                     return (PAYLOAD(wilderness));
@@ -805,42 +819,50 @@ void *srealloc(void *oldp, size_t size)
         // reaching here- next and previous were not enough or not adjacent!
         if (next != nullptr && prev != nullptr)
         { // both adjacent
-            if (next->size + meta->size + prev->size >= size)
-            { // then merge all 3
-                if (next != wilderness)
-                {
-                    // update list:
-                    eraseFreeBlock(prev);
-                    eraseFreeBlock(next);
-                    // merge:
-                    meta = _mergeAndCopy(prev, meta, 1);
-                    meta = _mergeAndCopy(meta, next, 0);
-
-                    int remaining = meta->size - size;
-                    if (isSplitable(remaining))
-                    { // split what remains
-                        MallocMetadata *new_block = _split(meta, remaining);
-                        sfree((PAYLOAD(new_block)));
-                    }
-                    return PAYLOAD(meta);
+            // First- merge:
+            eraseFreeBlock(prev);
+            eraseFreeBlock(next);
+            meta = _mergeAndCopy(prev, meta, 1);
+            meta = _mergeAndCopy(meta, next, 0);
+            int remaining = meta->size - size;
+            if (next != wilderness)
+            {
+                if (isSplitable(remaining))
+                { // All three is more than enough and the last is not wilderness
+                    // -> Merge, split and add free block.
+                    MallocMetadata *new_block = _split(meta, remaining);
+                    sfree((PAYLOAD(new_block)));
                 }
-                else
-                {
-                    eraseFreeBlock(prev);
-                    eraseFreeBlock(next);
-                    meta = _mergeAndCopy(prev, meta, 1);
-                    meta = _mergeAndCopy(meta, next, 0);
-                    wilderness = meta;
-                    int remaining = meta->size - size;
-                    if (isSplitable(remaining))
-                    { // split what remains
-                        wilderness = _split(meta, remaining);
-                    }
-                    return PAYLOAD(meta);
+                if (remaining < 0)
+                { // All three are not enough and the last is not wilderness
+                    // -> Merge, smalloc.
+                    addFreeBlock(meta);
+                    return smalloc(og_size);
                 }
             }
-
-            if (next == wilderness)
+            else
+            {
+                if (isSplitable(remaining))
+                { // All three is more than enough and the last is wilderness
+                    // -> Merge, split and add free block (new wilderness).
+                    wilderness = _split(meta, remaining);
+                    addFreeBlock(wilderness);
+                }
+                if (remaining < 0)
+                { // All three are not enough and the last is wilderness
+                    // -> Merge, enlarge wilderness.
+                    int addition = -remaining;
+                    void *ptr = sbrk(addition);
+                    if (ptr == (void *)(-1))
+                    {
+                        return nullptr;
+                    }
+                    allocated_bytes += addition;
+                    wilderness = meta;
+                }
+            }
+            return PAYLOAD(meta);
+            /* if (next == wilderness)
             {
                 // all 3 weren't enough. we'll connect all 3 and enlrge wilderness:
 
@@ -862,7 +884,7 @@ void *srealloc(void *oldp, size_t size)
                 wilderness->size += addition;
                 wilderness->is_free = false;
                 return PAYLOAD(wilderness);
-            }
+            } */
         }
 
         if (next != nullptr && next == wilderness)
@@ -882,17 +904,11 @@ void *srealloc(void *oldp, size_t size)
             wilderness->size += addition;
             return PAYLOAD(wilderness);
         }
-
-        // even all merging 3 adjacent didn't work :(
-        // finding a block in the free_list or allocating new if necessary:
-        MallocMetadata *sweet_spot = (MallocMetadata *)smalloc(size);
-        if (meta != nullptr)
-        {
-            sfree(PAYLOAD(meta));
-            return PAYLOAD(sweet_spot);
-        }
-        perror("no spot was found! problems with smalloc?");
-        return nullptr;
+    
+        // If got here-
+        // free current block (and merge if possible) and smalloc
+        sfree(oldp);
+        return smalloc(og_size);
     }
 }
 

@@ -387,8 +387,9 @@ void test_srealloc_common_sizes_a()
     void *p8 = smalloc(5000);
     void *p9 = smalloc(5000);
     void *p10 = smalloc(5000);
-
+    s.set();
     sfree(p1);
+    s.set();
     // printMemory();
     void *p11 = srealloc(p2, 2000); // no merging
     // printMemory();
@@ -398,20 +399,23 @@ void test_srealloc_common_sizes_a()
     s.compare(2, expected_num_free_bytes, 11, expected_num_allocated_bytes, 11 * MD_SIZE, MD_SIZE, __LINE__);
 
     sfree(p10);
+    s.set();
     sfree(p8);
     // printMemory();
+    s.set(); // <p1>[p2,1]<p2,2>[p3][p4][p5][p6][p7]<p8>[p9]<p10>
     void *p12 = srealloc(p9, 2000); // a - no merging, split after useing the block. (should merge 2 free block afterwards?)
-    // printMemory();
+             // <p1>[p2,1]<p2,2>[p3][p4][p5][p6][p7]<p8>[p9,1]<p9,2+p10>
+    s.set();
     expected_num_free_bytes = expected_num_free_bytes + 5000 + 8000;
     expected_num_allocated_bytes = expected_num_allocated_bytes;
-    s.set();
     s.compare(4, expected_num_free_bytes, 11, expected_num_allocated_bytes, 11 * MD_SIZE, MD_SIZE, __LINE__);
 
-    smalloc(8000);
+    smalloc(8000); // <p1>[p2,1]<p2,2>[p3][p4][p5][p6][p7]<p8>[p9,1][p9,2+p10]
+    s.set();
     p12 = srealloc(p9, 6000); // b, p9 isnt wilderness - merge with lower address (p8).
+    s.set();
     expected_num_free_bytes = expected_num_free_bytes - 8000 - 5000 + 1000;
     expected_num_allocated_bytes = expected_num_allocated_bytes;
-    s.set();
     s.compare(3, expected_num_free_bytes, 11, expected_num_allocated_bytes, 11 * MD_SIZE, MD_SIZE, __LINE__);
 }
 void test_srealloc_common_sizes_b1()
@@ -436,8 +440,9 @@ void test_srealloc_common_sizes_b2()
 
     void *p9 = smalloc(5000);
     void *p10 = smalloc(5000);
-
+    s.set();
     sfree(p9);
+    s.set();
     void *p11 = srealloc(p10, 6000); // b, p9 is wilderness - merge with lower address, and dont enlarge - need to split afterwards
     s.set();
     s.compare(1, 4000, 2, 10000, 2 * MD_SIZE, MD_SIZE, __LINE__);
@@ -465,8 +470,11 @@ void test_srealloc_common_sizes_d()
     void *p1 = smalloc(1000);
     void *p2 = smalloc(5000);
     void *p3 = smalloc(5000);
+    s.set();
     sfree(p1);
+    s.set();
     sfree(p3);
+    s.set();
     void *p4 = srealloc(p2, 7000); // d, lower and higher adjacent blocks, lower isnt enough, higher is.
     s.set();
     s.compare(2, 1000 + 5000 - 2000, 3, 11000, 3 * MD_SIZE, MD_SIZE, __LINE__);
@@ -502,11 +510,15 @@ void test_srealloc_common_sizes_e2()
     void *p1 = smalloc(5000);
     void *p2 = smalloc(5000);
     void *p3 = smalloc(5000);
+    s.set();
     sfree(p1);
+    s.set();
     sfree(p3);
+    s.set();
     void *p4 = srealloc(p2, 13000); // e, lower and higher adjacent blocks, join them all, and dont split the free space to a second block
     s.set();
-    s.compare(0, 0, 1, 15000 + 2 * MD_SIZE, 1 * MD_SIZE, MD_SIZE, __LINE__);
+    s.compare(1, 2000 + MD_SIZE, 2, 15000+MD_SIZE, 2 * MD_SIZE, MD_SIZE, __LINE__);
+    // s.compare(0, 0, 1, 15000 + 2 * MD_SIZE, 1 * MD_SIZE, MD_SIZE, __LINE__);
 }
 void test_srealloc_common_sizes_f_i()
 { // comments represents actual memory
@@ -517,12 +529,15 @@ void test_srealloc_common_sizes_f_i()
     void *p1 = smalloc(5000);
     void *p2 = smalloc(5000);
     void *p3 = smalloc(5000);
+    s.set();
     sfree(p1);
+    s.set();
     sfree(p3);
+    s.set();
     void *p4 = srealloc(p2, 20000); // f, lower and higher adjacent blocks, cant join them all (not enough space), higer is wilderness - so enlarge
     s.set();
-    // s.compare(0,0,1,20000,1*MD_SIZE,MD_SIZE,__LINE__);
-    s.compare(1, 2000 + MD_SIZE, 2, 15000 + MD_SIZE, 2 * MD_SIZE, MD_SIZE, __LINE__);
+    s.compare(0,0,1,20000,1*MD_SIZE,MD_SIZE,__LINE__);
+    // s.compare(1, 2000 + MD_SIZE, 2, 15000 + MD_SIZE, 2 * MD_SIZE, MD_SIZE, __LINE__);
 }
 void test_srealloc_common_sizes_f_ii()
 { // comments represents actual memory
@@ -556,22 +571,21 @@ void test_srealloc_common_sizes_g()
     void *p1 = smalloc(5000);
     void *p2 = smalloc(5000);
     void *p3 = smalloc(5000);
-    void *p10 = smalloc(5000);
+    void *p35 = smalloc(5000);
     void *p4 = smalloc(20000);
     void *p5 = smalloc(20000);
-
+    s.set();
     sfree(p1);
-    // sfree(p2);
+    s.set();
     sfree(p3);
+    s.set();    //  <p1>[p2]<p3>[p35][p4][p5]
     void *p6 = srealloc(p2, 30000);
-
-    s.set();
+    s.set();    //  <p1+p2+p3>[p35][p4][p5][p6]
     s.compare(1, 15000 + 2 * MD_SIZE, 5, 5000 + 30000 + 2 * 20000 + 15000 + 2 * MD_SIZE, 5 * MD_SIZE, MD_SIZE, __LINE__);
-
     sfree(p6);
-
-    void *p7 = srealloc(p10, 50000);
-    s.set();
+    s.set();    //  <p1+p2+p3>[p35][p4][p5]<p6>
+    void *p7 = srealloc(p35, 50000);
+    s.set();    //  <p1+p2+p3+p35>[p4][p5][p6+p7]
     s.compare(1, 20000 + 3 * MD_SIZE, 4, 50000 + 2 * 20000 + 15000 + 5000 + 3 * MD_SIZE, 4 * MD_SIZE, MD_SIZE, __LINE__);
 }
 #define NUM_TESTS 17
@@ -615,7 +629,7 @@ string tests_string[NUM_TESTS] = {
 
 int main(int argc, char *argv[])
 {
-    int how_many_tests = 8;
+    int how_many_tests = NUM_TESTS;
 
     how_many_tests = (how_many_tests > NUM_TESTS) ? NUM_TESTS : how_many_tests;
     int i = 0;
