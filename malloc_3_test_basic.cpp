@@ -83,29 +83,49 @@ void Stats::set()
     } while (0)
 
 
-TEST_CASE("Alignment MMAP", "[malloc3]")
+TEST_CASE("Reuse two blocks sizes small reversed", "[malloc3]")
 {
-    // verify_blocks(0, 0, 0, 0);
+    verify_blocks(0, 0, 0, 0);
+
     void *base = sbrk(0);
-    Stats s;
-    REQUIRE(_size_meta_data() % 8 == 0);
-    REQUIRE(_num_allocated_bytes() % 8 == 0);
-    REQUIRE(_num_free_bytes() % 8 == 0);
-    s.set();
-    char *a = (char *)smalloc(MMAP_THRESHOLD);
-    s.set();
+    char *a = (char *)smalloc(100);
     REQUIRE(a != nullptr);
-    REQUIRE((size_t)a % 8 == 0);
-    verify_blocks(1, MMAP_THRESHOLD, 0, 0);
-    verify_size_with_large_blocks(base, 0);
-    REQUIRE(_size_meta_data() % 8 == 0);
-    REQUIRE(_num_allocated_bytes() % 8 == 0);
-    REQUIRE(_num_free_bytes() % 8 == 0);
+
+    verify_blocks(1, 104, 0, 0);
+    verify_size(base);
+
+    char *padding = (char *)smalloc(10);
+    REQUIRE(padding != nullptr);
+
+    verify_blocks(2, 120, 0, 0);
+    verify_size(base);
+
+    char *b = (char *)smalloc(10);
+    REQUIRE(b != nullptr);
+    REQUIRE(b != a);
+
+    verify_blocks(3, 136, 0, 0);
+    verify_size(base);
 
     sfree(a);
-    verify_blocks(0, 0, 0, 0);
+    verify_blocks(3, 136, 1, 104);
     verify_size(base);
-    REQUIRE(_size_meta_data() % 8 == 0);
-    REQUIRE(_num_allocated_bytes() % 8 == 0);
-    REQUIRE(_num_free_bytes() % 8 == 0);
+    sfree(b);
+    verify_blocks(3, 136, 2, 120);
+    verify_size(base);
+
+    char *c = (char *)smalloc(10);
+    REQUIRE(c != nullptr);
+    REQUIRE(c == b);
+
+    verify_blocks(3, 136, 1, 104);
+    verify_size(base);
+
+    sfree(c);
+    verify_blocks(3, 136, 2, 120);
+    verify_size(base);
+
+    sfree(padding);
+    verify_blocks(1, 136 + 2 * _size_meta_data(), 1, 136 + 2 * _size_meta_data());
+    verify_size(base);
 }

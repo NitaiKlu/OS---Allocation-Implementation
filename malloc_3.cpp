@@ -406,6 +406,8 @@ MallocMetadata *_findBestFit(size_t size)
     {
         if (it->size >= size) // there is enough room in this block
         {
+            if(it->size > wilderness->size)
+                return nullptr; //it's better to take wilderness
             return it;
         }
     }
