@@ -29,7 +29,7 @@ public:
     ~MetaDataList() = default;
     MallocMetadata *begin();
     MallocMetadata *end();
-    MallocMetadata *findFree(int needed_size);
+    MallocMetadata *findFree(size_t needed_size);
     void pushLast(MallocMetadata *to_add);
 };
 void MetaDataList::setHead(MallocMetadata *new_head)
@@ -52,7 +52,7 @@ MallocMetadata *MetaDataList::getLast()
 {
     return this->tail;
 }
-MallocMetadata *MetaDataList::findFree(int needed_size)
+MallocMetadata *MetaDataList::findFree(size_t needed_size)
 {
     for (auto it = begin(); it != end(); it = it->next)
     {
