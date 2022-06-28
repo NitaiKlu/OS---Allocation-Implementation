@@ -1,11 +1,24 @@
-cmake_minimum_required(VERSION 3.0.0)
-project(OurAllocator VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.14)
 
+project(os-hw3)
+
+Include(FetchContent)
+
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.0.1 # or a later release
+)
+
+FetchContent_MakeAvailable(Catch2)
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
-enable_testing()
+include(Catch)
 
-add_executable(OurAllocator niv_tests/main.cpp)
+set(SOURCE_DIR ${CMAKE_SOURCE_DIR})
 
-set(CPACK_PROJECT_NAME ${PROJECT_NAME})
-set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
-include(CPack)
+add_executable(malloc_3_test malloc_3_test_basic.cpp malloc_3.cpp)
+
+target_link_libraries(malloc_3_test PRIVATE Catch2::Catch2WithMain)
+
+target_compile_options(malloc_3_test PRIVATE -Wpointer-arith )
