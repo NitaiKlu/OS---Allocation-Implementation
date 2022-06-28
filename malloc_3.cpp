@@ -218,15 +218,15 @@ void initialize()
 void updateMmapAdd(MallocMetadata *mmap_block)
 {
     allocated_blocks++;
-    allocated_bytes += mmap_block->size - sizeof(MallocMetadata);
-    meta_data_bytes += sizeof(MallocMetadata)
+    allocated_bytes += mmap_block->size - meta_size;
+    // meta_data_bytes += sizeof(MallocMetadata);
 }
 
 void updateMmapRemove(MallocMetadata *mmap_block)
 {
     allocated_blocks--;
-    allocated_bytes -= mmap_block->size - sizeof(MallocMetadata);
-    meta_data_bytes -= sizeof(MallocMetadata);
+    allocated_bytes -= mmap_block->size - meta_size;
+    // meta_data_bytes -= sizeof(MallocMetadata);
 }
 
 
@@ -450,10 +450,10 @@ void *smalloc(size_t size)
     if (!initialized)
         initialize();
 
-    if (size > LARGE_MEM) // mmap size
+    if (size >= LARGE_MEM) // mmap size
     {
-        size = padd_size_no_tip(size);
-        void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, 0, 0);
+        size = padd_size(size);
+        void *ptr = mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
         if (ptr == MAP_FAILED)
         {
             return nullptr;
@@ -599,18 +599,19 @@ void sfree(void *p)
     //     return;
 
     // check and handle if mmapped
-    if (meta->size > LARGE_MEM)
+    if (meta->size - meta_size >= LARGE_MEM)
     {
         if (mmap_list.find(meta) == false)
             return;
         mmap_list.erase(meta);
+        updateMmapRemove(meta);
         int err = munmap(meta, meta->size);
         if (err != 0)
         {
             perror("unmapping failed.\n");
             return;
         }
-        updateMmapRemove(meta);
+        return;
     }
 
     // check and handle if wilderness is meta
@@ -689,7 +690,7 @@ void *srealloc(void *oldp, size_t size)
     MallocMetadata *meta = (MallocMetadata *)(oldp - offset);
     if (meta->size > LARGE_MEM) // mmap allocation
     {
-        size = padd_size_no_tip(size);
+        size = padd_size(size);
         if (size <= meta->size) // check if this is the right way or need to check only if size == meta.size
             return PAYLOAD(meta);
 
