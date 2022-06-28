@@ -210,7 +210,13 @@ void initialize()
 {
     if (initialized)
         return;
+    void *base_addr;
     base_addr = sbrk(0);
+    long address = (long)base_addr;
+    if(address % 8 != 0) {
+        int add = 8 - address % 8;
+        sbrk(add);
+    }
     wilderness = nullptr;
     initialized = true;
 }
@@ -367,6 +373,8 @@ MallocMetadata *_findClosestPrevious(MallocMetadata *block)
     }
     MallocTip *prev_tip = (MallocTip *)((void *)block - sizeof(MallocTip));
     MallocMetadata *prev_block = (MallocMetadata *)(prev_tip->front);
+    if(!prev_block)
+        return nullptr;
     if (prev_block->is_free)
         return prev_block;
     return nullptr;
@@ -379,7 +387,11 @@ MallocMetadata *_findClosestPrevious(MallocMetadata *block)
  */
 MallocMetadata *_previousToWilderness()
 {
-    return _findClosestPrevious(wilderness);
+    if(wilderness->next != nullptr || wilderness->prev != nullptr)
+    {
+        return _findClosestPrevious(wilderness);
+    }
+    return nullptr;
 }
 
 /**

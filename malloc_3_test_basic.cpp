@@ -82,134 +82,30 @@ void Stats::set()
         REQUIRE(diff == (size_t)after - (size_t)base); \
     } while (0)
 
-TEST_CASE("Large unaligned allocation", "[malloc3]")
+
+TEST_CASE("Alignment MMAP", "[malloc3]")
 {
     // verify_blocks(0, 0, 0, 0);
     void *base = sbrk(0);
-    char *a = (char *)smalloc(MMAP_THRESHOLD + 1);
+    Stats s;
+    REQUIRE(_size_meta_data() % 8 == 0);
+    REQUIRE(_num_allocated_bytes() % 8 == 0);
+    REQUIRE(_num_free_bytes() % 8 == 0);
+    s.set();
+    char *a = (char *)smalloc(MMAP_THRESHOLD);
+    s.set();
     REQUIRE(a != nullptr);
-    void *after = sbrk(0);
-    REQUIRE(0 == (size_t)after - (size_t)base);
-    verify_blocks(1, MMAP_THRESHOLD + 8, 0, 0);
+    REQUIRE((size_t)a % 8 == 0);
+    verify_blocks(1, MMAP_THRESHOLD, 0, 0);
     verify_size_with_large_blocks(base, 0);
+    REQUIRE(_size_meta_data() % 8 == 0);
+    REQUIRE(_num_allocated_bytes() % 8 == 0);
+    REQUIRE(_num_free_bytes() % 8 == 0);
 
     sfree(a);
     verify_blocks(0, 0, 0, 0);
     verify_size(base);
+    REQUIRE(_size_meta_data() % 8 == 0);
+    REQUIRE(_num_allocated_bytes() % 8 == 0);
+    REQUIRE(_num_free_bytes() % 8 == 0);
 }
-
-// TEST_CASE("Alignment", "[malloc3]")
-// {
-//     // verify_blocks(0, 0, 0, 0);
-//     void *base = sbrk(0);
-
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     char *a = (char *)smalloc(10);
-//     REQUIRE(a != nullptr);
-//     REQUIRE((size_t)a % 8 == 0);
-//     verify_blocks(1, 16, 0, 0);
-//     verify_size(base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     char *b = (char *)smalloc(10);
-//     REQUIRE(b != nullptr);
-//     REQUIRE((size_t)b % 8 == 0);
-//     verify_blocks(2, 32, 0, 0);
-//     verify_size(base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     sfree(a);
-//     verify_blocks(2, 32, 1, 16);
-//     verify_size(base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     sfree(b);
-//     verify_blocks(1, 32 + _size_meta_data(), 1, 32 + _size_meta_data());
-//     verify_size(base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-// }
-
-// TEST_CASE("Alignment unaligned base", "[malloc3]")
-// {
-//     // verify_blocks(0, 0, 0, 0);
-//     void *base = sbrk(0);
-//     // Should be on all linux systems
-//     REQUIRE(((size_t)base) % 8 == 0);
-//     sbrk(3);
-//     base = sbrk(0);
-//     void *aligned_base = (void *)((size_t)sbrk(0) + 5);
-//     REQUIRE(((size_t)base) % 8 != 0);
-
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     char *a = (char *)smalloc(10);
-//     REQUIRE(a != nullptr);
-//     REQUIRE((size_t)a % 8 == 0);
-//     verify_blocks(1, 16, 0, 0);
-//     verify_size(aligned_base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     char *b = (char *)smalloc(10);
-//     REQUIRE(b != nullptr);
-//     REQUIRE((size_t)b % 8 == 0);
-//     verify_blocks(2, 32, 0, 0);
-//     verify_size(aligned_base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     sfree(a);
-//     verify_blocks(2, 32, 1, 16);
-//     verify_size(aligned_base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     sfree(b);
-//     verify_blocks(1, 32 + _size_meta_data(), 1, 32 + _size_meta_data());
-//     verify_size(aligned_base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-// }
-
-// TEST_CASE("Alignment MMAP", "[malloc3]")
-// {
-//     // verify_blocks(0, 0, 0, 0);
-//     void *base = sbrk(0);
-
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     char *a = (char *)smalloc(MMAP_THRESHOLD);
-//     REQUIRE(a != nullptr);
-//     REQUIRE((size_t)a % 8 == 0);
-//     verify_blocks(1, MMAP_THRESHOLD, 0, 0);
-//     verify_size_with_large_blocks(base, 0);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-
-//     sfree(a);
-//     verify_blocks(0, 0, 0, 0);
-//     verify_size(base);
-//     REQUIRE(_size_meta_data() % 8 == 0);
-//     REQUIRE(_num_allocated_bytes() % 8 == 0);
-//     REQUIRE(_num_free_bytes() % 8 == 0);
-// }
