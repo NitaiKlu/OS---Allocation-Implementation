@@ -191,7 +191,7 @@ int MetaDataList::getSize()
     return this->size;
 }
 
-const long max_size = std::pow(10, 8);
+const long max_size = (1e8);
 
 const size_t meta_size = sizeof(MallocMetadata) + sizeof(MallocTip);
 const size_t offset = sizeof(MallocMetadata);
@@ -208,24 +208,28 @@ bool initialized = false;
 
 void initialize()
 {
-    base_addr = sbrk(0);
-
-    void *ptr = sbrk(meta_size);
-    if (ptr == (void *)(-1))
-    {
+    if (initialized)
         return;
-    }
-    wilderness = (MallocMetadata *)ptr;
-    wilderness->size = meta_size;
-    wilderness->is_free = true;
-    wilderness->next = nullptr;
-    wilderness->prev = nullptr;
-    // stats:
-    allocated_blocks++; // total num of blocks
-    meta_data_bytes += meta_size;
-
+    base_addr = sbrk(0);
+    wilderness = nullptr;
     initialized = true;
 }
+
+void updateMmapAdd(MallocMetadata *mmap_block)
+{
+    allocated_blocks++;
+    allocated_bytes += mmap_block->size - sizeof(MallocMetadata);
+    meta_data_bytes += sizeof(MallocMetadata)
+}
+
+void updateMmapRemove(MallocMetadata *mmap_block)
+{
+    allocated_blocks--;
+    allocated_bytes -= mmap_block->size - sizeof(MallocMetadata);
+    meta_data_bytes -= sizeof(MallocMetadata);
+}
+
+
 
 void eraseFreeBlock(MallocMetadata *block)
 {
@@ -459,8 +463,27 @@ void *smalloc(size_t size)
         new_mmap->is_free = false;
 
         mmap_list.push(new_mmap);
-        // should update stats??***********************
+        // stats:
+        updateMmapAdd(new_mmap);
         return PAYLOAD(new_mmap);
+    }
+
+    if (!wilderness)
+    {
+        void *ptr = sbrk(meta_size);
+        if (ptr == (void *)(-1))
+        {
+            return nullptr;
+        }
+        wilderness = (MallocMetadata *)ptr;
+        wilderness->size = meta_size;
+        wilderness->is_free = true;
+        wilderness->next = nullptr;
+        wilderness->prev = nullptr;
+
+        // stats:
+        allocated_blocks++; // total num of blocks
+        meta_data_bytes += meta_size;
     }
 
     // metaData size + 8-multiple padding
@@ -587,6 +610,7 @@ void sfree(void *p)
             perror("unmapping failed.\n");
             return;
         }
+        updateMmapRemove(meta);
     }
 
     // check and handle if wilderness is meta
@@ -679,12 +703,13 @@ void *srealloc(void *oldp, size_t size)
         *new_mmap = MallocMetadata(size);
         new_mmap->is_free = false;
         mmap_list.push(new_mmap);
-
+        updateMmapAdd(new_mmap);
         // moving data:
         std::memmove(PAYLOAD(new_mmap), PAYLOAD(meta), meta->size - offset);
 
         // deleting current
         mmap_list.erase(meta);
+        updateMmapRemove(meta);
         int err = munmap(meta, meta->size);
         if (err != 0)
         {
@@ -695,6 +720,23 @@ void *srealloc(void *oldp, size_t size)
     }
     else // sbrk allocation
     {
+        if (!wilderness)
+        {
+            void *ptr = sbrk(meta_size);
+            if (ptr == (void *)(-1))
+            {
+                return nullptr;
+            }
+            wilderness = (MallocMetadata *)ptr;
+            wilderness->size = meta_size;
+            wilderness->is_free = true;
+            wilderness->next = nullptr;
+            wilderness->prev = nullptr;
+
+            // stats:
+            allocated_blocks++; // total num of blocks
+            meta_data_bytes += meta_size;
+        }
         size = padd_size(size);
         if (size <= meta->size) // Can re-use same block
         {
@@ -782,7 +824,7 @@ void *srealloc(void *oldp, size_t size)
             }
         }
         if (next != nullptr)
-        { 
+        {
             // try to merge:
             if (next->size + meta->size >= size)
             { // then next is enough
@@ -904,7 +946,7 @@ void *srealloc(void *oldp, size_t size)
             wilderness->size += addition;
             return PAYLOAD(wilderness);
         }
-    
+
         // If got here-
         // free current block (and merge if possible) and smalloc
         sfree(oldp);
@@ -914,25 +956,33 @@ void *srealloc(void *oldp, size_t size)
 
 size_t _num_free_blocks()
 {
+    initialize();
+    if(!wilderness)
+        return 0;
     return free_list.getSize() + wilderness->is_free;
 }
 size_t _num_free_bytes()
 {
+    initialize();
     return free_bytes;
 }
 size_t _num_allocated_blocks()
 {
+    initialize();
     return allocated_blocks;
 }
 size_t _num_allocated_bytes()
 {
+    initialize();
     return allocated_bytes;
 }
 size_t _size_meta_data()
 {
+    initialize();
     return meta_size;
 }
 size_t _num_meta_data_bytes()
 {
+    initialize();
     return _size_meta_data() * _num_allocated_blocks();
 }
