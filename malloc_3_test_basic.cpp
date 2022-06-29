@@ -25,7 +25,7 @@ public:
     Stats();
     Stats(size_t a, size_t b, size_t c, size_t d, size_t e, size_t f);
     void set();
-    };
+};
 Stats::Stats()
 {
     num_free_blocks = 0;
@@ -55,17 +55,15 @@ void Stats::set()
     size_meta_data = _size_meta_data();
 };
 
-
-#define verify_blocks(allocated_blocks, allocated_bytes, free_blocks, free_bytes) \
-    do                                                                            \
-    {                                                                             \
-        REQUIRE(_num_allocated_blocks() == allocated_blocks);                                                          \
-        REQUIRE(_num_allocated_bytes() == aligned_size(allocated_bytes));                                              \
-        REQUIRE(_num_free_blocks() == free_blocks);                                                                    \
-        REQUIRE(_num_free_bytes() == aligned_size(free_bytes));                                                        \
-        REQUIRE(_num_meta_data_bytes() == aligned_size(_size_meta_data() * allocated_blocks));                         \
+#define verify_blocks(allocated_blocks, allocated_bytes, free_blocks, free_bytes)              \
+    do                                                                                         \
+    {                                                                                          \
+        REQUIRE(_num_allocated_blocks() == allocated_blocks);                                  \
+        REQUIRE(_num_allocated_bytes() == aligned_size(allocated_bytes));                      \
+        REQUIRE(_num_free_blocks() == free_blocks);                                            \
+        REQUIRE(_num_free_bytes() == aligned_size(free_bytes));                                \
+        REQUIRE(_num_meta_data_bytes() == aligned_size(_size_meta_data() * allocated_blocks)); \
     } while (0)
-
 
 #define verify_size(base)                                                                             \
     do                                                                                                \
@@ -82,50 +80,66 @@ void Stats::set()
         REQUIRE(diff == (size_t)after - (size_t)base); \
     } while (0)
 
+template <typename T>
+void populate_array(T *array, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        array[i] = (T)i;
+    }
+}
 
-TEST_CASE("Reuse two blocks sizes small reversed", "[malloc3]")
+template <typename T>
+void validate_array(T *array, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        REQUIRE((array[i] == (T)i));
+    }
+}
+
+TEST_CASE("srealloc case h", "[malloc3]")
 {
     verify_blocks(0, 0, 0, 0);
-
     void *base = sbrk(0);
-    char *a = (char *)smalloc(100);
+    char *pad1 = (char *)smalloc(32);
+    char *a = (char *)smalloc(32);
+    char *pad2 = (char *)smalloc(32);
+    char *b = (char *)smalloc(160);
+    char *pad3 = (char *)smalloc(32);
+    REQUIRE(pad1 != nullptr);
     REQUIRE(a != nullptr);
-
-    verify_blocks(1, 104, 0, 0);
-    verify_size(base);
-
-    char *padding = (char *)smalloc(10);
-    REQUIRE(padding != nullptr);
-
-    verify_blocks(2, 120, 0, 0);
-    verify_size(base);
-
-    char *b = (char *)smalloc(10);
+    REQUIRE(pad2 != nullptr);
     REQUIRE(b != nullptr);
-    REQUIRE(b != a);
+    REQUIRE(pad3 != nullptr);
 
-    verify_blocks(3, 136, 0, 0);
-    verify_size(base);
+    size_t pad_size = 32 * 3;
+    size_t blocks_size = 32 + 160;
 
-    sfree(a);
-    verify_blocks(3, 136, 1, 104);
+    verify_blocks(5, blocks_size + pad_size, 0, 0);
     verify_size(base);
+    populate_array(a, 32);
+
     sfree(b);
-    verify_blocks(3, 136, 2, 120);
+    verify_blocks(5, blocks_size + pad_size, 1, 160);
     verify_size(base);
 
-    char *c = (char *)smalloc(10);
-    REQUIRE(c != nullptr);
-    REQUIRE(c == b);
+    char *new_a = (char *)srealloc(a, 320);
+    REQUIRE(new_a != nullptr);
+    REQUIRE(new_a != a);
+    REQUIRE(new_a != b);
+    blocks_size += 320;
+    verify_blocks(6, blocks_size + pad_size, 2, 32 + 160);
+    verify_size(base);
+    validate_array(new_a, 32);
 
-    verify_blocks(3, 136, 1, 104);
+    sfree(new_a);
+    verify_blocks(6, blocks_size + pad_size, 3, blocks_size);
     verify_size(base);
 
-    sfree(c);
-    verify_blocks(3, 136, 2, 120);
-    verify_size(base);
-
-    sfree(padding);
-    verify_blocks(1, 136 + 2 * _size_meta_data(), 1, 136 + 2 * _size_meta_data());
+    sfree(pad1);
+    sfree(pad2);
+    sfree(pad3);
+    verify_blocks(1, blocks_size + pad_size + 5 * _size_meta_data(), 1, blocks_size + pad_size + 5 * _size_meta_data());
     verify_size(base);
 }
