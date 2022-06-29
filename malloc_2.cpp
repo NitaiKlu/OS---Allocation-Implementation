@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstring>
 
-const long max_size = std::pow(10, 8);
+const long max_size = 1e8;
 
 struct MallocMetadata
 {
@@ -114,7 +114,7 @@ void *smalloc(size_t size)
         allocated_blocks++;
         allocated_bytes += size;
 
-        return ptr + meta_size;
+        return (uint8_t *)ptr + meta_size;
     }
     else
     {
@@ -122,7 +122,7 @@ void *smalloc(size_t size)
         free_blocks--;
         free_bytes -= meta_ptr->size;
 
-        return (void *)meta_ptr + meta_size;
+        return (uint8_t *)meta_ptr + meta_size;
     }
 }
 
@@ -140,7 +140,7 @@ void sfree(void *p)
 {
     if (!p)
         return;
-    MallocMetadata *meta = ((MallocMetadata *)(p - meta_size));
+    MallocMetadata *meta = ((MallocMetadata *)((uint8_t *)p - meta_size));
     if (meta->is_free)
         return;
     meta->is_free = true;
@@ -153,7 +153,7 @@ void *srealloc(void *oldp, size_t size)
 {
     if (!oldp)
         return smalloc(size);
-    MallocMetadata *old_meta = ((MallocMetadata *)(oldp - meta_size));
+    MallocMetadata *old_meta = ((MallocMetadata *)((uint8_t *)oldp - meta_size));
     if (old_meta->size >= size)
     {
         return oldp;

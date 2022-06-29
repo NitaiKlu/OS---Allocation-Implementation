@@ -2,7 +2,7 @@
 #include <unistd.h>
 #include <cmath>
 
-const long max_size = std::pow(10, 8);
+const long max_size = 1e8;
 
 void *smalloc(size_t size)
 {
